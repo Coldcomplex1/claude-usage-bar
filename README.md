@@ -97,7 +97,9 @@ brings the box back whenever you want it.
   the icon → Options):
   - Master on/off for the bar.
   - Design 1 or Design 2: the full bar under the chat, or a compact widget tucked
-    into the composer toolbar. Set at install; Design 1 until you choose.
+    into the composer toolbar (on a composer with no toolbar row, such as the
+    one-line chat composer, it takes its own row under the input instead). Set at
+    install; Design 1 until you choose.
     "Run setup again" reopens the install box.
   - Toolbar-icon badge: a colored usage number on the extension icon so you can
     read it at a glance. Off by default; when on, choose whether it shows your

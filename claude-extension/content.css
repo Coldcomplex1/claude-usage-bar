@@ -94,6 +94,14 @@
   font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
   font-size: 12px; line-height: 1; color: var(--cub-fg);
 }
+/* No toolbar row to sit in (the chat composer is a single line): the widget takes
+   a row of its own directly under the input, rather than squeezing in beside the
+   text. Full width and left-aligned, so it reads like the toolbar row it replaces. */
+#cub-inline.cub-inline.cub-inline-row {
+  display: flex; box-sizing: border-box; width: 100%;
+  margin: 8px 2px 2px; align-self: stretch; justify-content: flex-start;
+}
+
 #cub-inline .cub-i-seg { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 #cub-inline .cub-i-seg[hidden] { display: none; }
 #cub-inline .cub-i-val { font-weight: 600; font-variant-numeric: tabular-nums; }
