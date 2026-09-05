@@ -2,7 +2,10 @@
 // on the Settings page) and stored in cub_design:
 //   Design 1 ("1", the fallback until asked): a slim full-width bar under the composer.
 //   Design 2 ("2"): a compact widget tucked into the composer toolbar, between
-//                   the "+" button and the model picker.
+//                   the "+" button and the model picker. Where the composer has no
+//                   toolbar row (the chat composer is a single line: "+", the input
+//                   and the mic), it takes its own row under the input instead, so
+//                   it never sits beside "Write a message...".
 // This file also carries the first-run setup box, for anyone who closed the
 // install tab without answering; see the section above fetchAndStore().
 // Session + All models are user-toggleable; Opus shows automatically only if the
@@ -276,7 +279,7 @@
   // Design 2: compact widget inside the composer toolbar.
   // ===================================================================
   var inlineEl = null;
-  var inlineObserver = null, inlineObservedToolbar = null, inlineReinserts = [];
+  var inlineObserver = null, inlineObservedParent = null, inlineObservedMode = "", inlineReinserts = [];
   var inlineResizeObserver = null, inlineLastMissLog = 0;
   var RING_C = 2 * Math.PI * 8; // circumference of the r=8 ring
 
@@ -371,6 +374,20 @@
     return null;
   }
 
+  // A control on the input's own line is not a toolbar. The chat composer is one
+  // row -- "+", the input, the mic -- so anchoring to its "+" put the widget beside
+  // the text and pushed "Write a message..." over. Two geometric ways to tell, both
+  // of which the real toolbar row (a row of its own, under the input) fails: the
+  // input's mid-line runs through the control, or the input starts to its right on
+  // the same line.
+  function sharesLineWithEditor(r, er){
+    var overlap = Math.min(er.bottom, r.bottom) - Math.max(er.top, r.top);
+    if (overlap <= 0) return false;
+    var mid = er.top + er.height / 2;
+    if (mid > r.top - 6 && mid < r.bottom + 6) return true;
+    return overlap > r.height * 0.6 && er.left >= r.right - 4;
+  }
+
   // The left-most control of the bottom-most row of toolbar controls in `container`,
   // limited to the band at/just below the input so page/sidebar buttons can't sneak
   // in. Broadened past <button> since claude.ai renders some controls as role=button.
@@ -383,6 +400,7 @@
       var r = b.getBoundingClientRect();
       if (r.width === 0 || r.height === 0 || r.height > 64) return;   // button-sized only
       if (r.top < er.top - 8 || r.top > er.bottom + 140) return;      // composer toolbar band
+      if (sharesLineWithEditor(r, er)) return;                        // the input's own row
       btns.push({ el: b, r: r });
     });
     if (btns.length < 2) return null;
@@ -403,7 +421,7 @@
   function stopInlineWatching(){
     if (inlineObserver) inlineObserver.disconnect();
     if (inlineResizeObserver) inlineResizeObserver.disconnect();
-    inlineObserver = null; inlineResizeObserver = null; inlineObservedToolbar = null;
+    inlineObserver = null; inlineResizeObserver = null; inlineObservedParent = null; inlineObservedMode = "";
   }
 
   // Re-insert the widget after the "+" if a re-render detaches it, mirroring the
@@ -411,9 +429,9 @@
   // alignment only ever changes when the toolbar's own box does, so we re-measure
   // then instead of on every heartbeat.
   function watchToolbar(parent){
-    if (inlineObservedToolbar === parent) return;
+    if (inlineObservedParent === parent && inlineObservedMode === "toolbar") return;
     stopInlineWatching();
-    inlineObservedToolbar = parent;
+    inlineObservedParent = parent; inlineObservedMode = "toolbar";
     inlineObserver = new MutationObserver(function(){
       if (!enabled || design !== "2" || !inlineEl || inlineEl.isConnected) return;
       if (!parent.isConnected) return;         // toolbar replaced -> let the heartbeat re-acquire
@@ -431,6 +449,24 @@
       });
       inlineResizeObserver.observe(parent);
     }
+  }
+
+  // Same job for the fallback row, mirroring the bar's watcher: if a re-render
+  // detaches the widget, put it straight back under the input rather than waiting
+  // for the next heartbeat. No ResizeObserver here -- a full-width row of its own
+  // has nothing to align to.
+  function watchInlineRow(parent, composer){
+    if (inlineObservedParent === parent && inlineObservedMode === "row") return;
+    stopInlineWatching();
+    inlineObservedParent = parent; inlineObservedMode = "row";
+    inlineObserver = new MutationObserver(function(){
+      if (!enabled || design !== "2" || !inlineEl || inlineEl.isConnected) return;
+      if (!composer.isConnected) return;        // composer replaced -> let the heartbeat re-acquire
+      if (!inlineReinsertAllowed()) return;     // thrashing -> back off
+      composer.insertAdjacentElement("afterend", inlineEl);
+      renderInline();
+    });
+    inlineObserver.observe(parent, { childList: true });
   }
 
   // Vertically center the widget on the "+" button, whatever the toolbar's own
@@ -454,20 +490,35 @@
     if (plus && plus.parentElement){
       var parent = plus.parentElement;
       anchor = plus;
+      inlineEl.classList.remove("cub-inline-row");
       if (!(inlineEl.parentElement === parent && inlineEl.previousElementSibling === plus)) plus.insertAdjacentElement("afterend", inlineEl);
       alignInline(plus);
       watchToolbar(parent);
       renderInline();
       return true;
     }
-    // Inline-only: with no toolbar to sit in, show nothing and retry later.
+    // No toolbar row to sit in (the chat composer is a single line). Take a row of
+    // our own directly under the input instead, at the same insertion point Design 1
+    // uses, so the readout still reads as "under the message" and the placeholder
+    // keeps its place.
+    var composer = findComposer();
+    if (composer && composer.parentElement){
+      anchor = composer;
+      inlineEl.classList.add("cub-inline-row");
+      inlineEl.style.transform = "";   // drop any leftover shift from alignInline()
+      if (!(inlineEl.parentElement === composer.parentElement && inlineEl.previousElementSibling === composer)) composer.insertAdjacentElement("afterend", inlineEl);
+      watchInlineRow(composer.parentElement, composer);
+      renderInline();
+      return true;
+    }
+    // Inline-only: nothing to attach to at all, so show nothing and retry later.
     anchor = null;
     stopInlineWatching();
     if (inlineEl.isConnected) inlineEl.remove();
     var now = Date.now();
     if (now - inlineLastMissLog > 5000){
       inlineLastMissLog = now;
-      try { console.debug("[Claude Usage Bar] Design 2: composer toolbar not found; will retry"); } catch (e) {}
+      try { console.debug("[Claude Usage Bar] Design 2: composer not found; will retry"); } catch (e) {}
     }
     return false;
   }
