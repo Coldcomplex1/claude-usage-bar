@@ -14,12 +14,13 @@
 //
 // The content script reacts to the cub_enabled storage change to show/hide the bar.
 
-importScripts("usage.js");   // classic service worker, so this gives us CUB.getUsage()
+importScripts("usage.js", "session.js");   // classic service worker: CUB.getUsage(), CUBS.summarize()
 
 var TOGGLE_KEY = "cub_enabled";
 var LAST_KEY = "cub_last";
 var BADGE_KEY = "cub_badge";
 var SETUP_KEY = "cub_setup";     // first-run chooser: { done, at } once answered
+var FREE_KEY = "cub_free_session";  // free plan: locally counted sends (session.js)
 var HEALTH_KEY = "cub_health";   // refresh bookkeeping/backoff; nothing renders it
 var DEFAULT_BADGE = { enabled: false, source: "session" };
 
@@ -38,6 +39,11 @@ function badgeColor(pct){ return pct > 80 ? BADGE_HIGH : pct >= 30 ? BADGE_MID :
 
 function winPct(m){ return (m && m.available && m.pct != null) ? Math.round(m.pct) : null; }
 
+// A free account has no percentage to show, so the badge carries the counted
+// message total instead, in the neutral colour: a count is not 0-100, and
+// running it through the usage thresholds would read as a warning it is not.
+function isFree(data){ return !!data && data.reported === false; }
+
 // The % the badge should show for the chosen source, or null if unavailable.
 function badgePct(data, source){
   if (!data) return null;
@@ -52,13 +58,20 @@ function badgePct(data, source){
 
 function clearBadge(){ chrome.action.setBadgeText({ text: "" }); }
 
-function renderBadge(enabled, badge, data){
+function renderBadge(enabled, badge, data, free){
   if (enabled === false || !badge.enabled) return clearBadge();
-  var pct = badgePct(data, badge.source);
-  if (pct == null) return clearBadge();
-  pct = Math.max(0, Math.min(100, pct));
-  chrome.action.setBadgeText({ text: String(pct) });
-  chrome.action.setBadgeBackgroundColor({ color: badgeColor(pct) });
+  var text, color;
+  if (isFree(data)){
+    if (!free || !free.count) return clearBadge();
+    text = String(free.count); color = BADGE_LOW;
+  } else {
+    var pct = badgePct(data, badge.source);
+    if (pct == null) return clearBadge();
+    pct = Math.max(0, Math.min(100, pct));
+    text = String(pct); color = badgeColor(pct);
+  }
+  chrome.action.setBadgeText({ text: text });
+  chrome.action.setBadgeBackgroundColor({ color: color });
   // Guarded: setBadgeTextColor is Chrome 110+; older Chromium forks fall back
   // to auto-contrast, which is still legible on these backgrounds.
   if (chrome.action.setBadgeTextColor) chrome.action.setBadgeTextColor({ color: "#ffffff" });
@@ -67,9 +80,17 @@ function renderBadge(enabled, badge, data){
 // The icon's hover text carries the full readout, so the whole thing can be read
 // without opening anything. The badge only has room for one number; this has room
 // for all three windows, their countdowns, and how old the reading is.
-function titleFor(data){
+function titleFor(data, free){
   var base = "Claude Usage Bar";
   if (!data) return base;
+  if (isFree(data)){
+    var left = free && free.resetAt ? CUB.fmtReset(free.resetAt) : "";
+    var n = (free && free.count) || 0;
+    return base + "\nSession (5h): " + n + (n === 1 ? " message" : " messages") + " counted" +
+      (left ? " \u00b7 resets in " + left : "") +
+      "\nClaude reports no usage percentage on the free plan." +
+      (data.fetchedAt ? "\nUpdated " + CUB.fmtAgo(data.fetchedAt) : "");
+  }
   var lines = [];
   [["Session (5h)", data.session], ["All models (7d)", data.allModels], ["Opus (7d)", data.opus]]
     .forEach(function (pair){
@@ -84,10 +105,11 @@ function titleFor(data){
 }
 
 function refreshBadge(){
-  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, BADGE_KEY], function (o){
+  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, BADGE_KEY, FREE_KEY], function (o){
     var badge = Object.assign({}, DEFAULT_BADGE, o[BADGE_KEY] || {});
-    renderBadge(o[TOGGLE_KEY] !== false, badge, o[LAST_KEY]);
-    chrome.action.setTitle({ title: titleFor(o[LAST_KEY]) });
+    var free = CUBS.summarize(o[FREE_KEY]);
+    renderBadge(o[TOGGLE_KEY] !== false, badge, o[LAST_KEY], free);
+    chrome.action.setTitle({ title: titleFor(o[LAST_KEY], free) });
   });
 }
 
@@ -103,7 +125,7 @@ chrome.commands.onCommand.addListener(function (command) {
 // all wake the service worker here and repaint the badge.
 chrome.storage.onChanged.addListener(function (changes, area){
   if (area !== "local") return;
-  if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY]) refreshBadge();
+  if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY] || changes[FREE_KEY]) refreshBadge();
 });
 
 // ---- Background refresh --------------------------------------------------

@@ -11,6 +11,12 @@ your weekly all-models usage. If your plan has a separate Opus allowance, that
 appears too. Each bar is color-coded, blue when you are under 30%, orange from 30%
 to 80%, and red above 80%, and it shows a countdown to when the limit resets.
 
+On the free plan Claude publishes no usage percentages at all, so there is nothing
+to fetch and no honest bar to fill. There the extension shows the one thing it can
+work out on its own: how many messages you have sent in the current 5-hour window,
+and the countdown to when that window rolls over. It is a count, not a percentage,
+because the free cap moves with demand, and it starts from when you install.
+
 There is nothing to set up. No tokens, no API keys, and no extra sign-in. As long as
 you are logged in to Claude, it just works, because it reads your usage straight from
 Claude using the session already in your browser. Everything stays on your device and
@@ -42,8 +48,21 @@ It reads your usage from Claude's own internal endpoints using the login session
 already in your browser:
 
 - `GET /api/organizations` → finds your chat org (probes each org and locks onto
-  the one with real usage; cached)
+  the one with real usage; cached). The org's `capabilities` also say which plan
+  you are on, which is used for wording only.
 - `GET /api/organizations/{id}/usage` → `five_hour`, `seven_day`, `seven_day_opus`
+
+Whether the percentage readout or the free-plan count appears is decided by
+whether that second call actually returned any windows, never by the plan name —
+so an account Claude reports usage for always gets the bars, whatever its
+capabilities happen to be called.
+
+On an account with no windows (the free plan) nothing is fetched to fill them.
+`session.js` counts sends instead, by watching the transcript for a new message
+bubble; it stores a timestamp per message and prunes anything older than five
+hours. Message text is never read or stored. A batch that adds several bubbles at
+once is history arriving (a page load, a conversation switch, scrolling back) and
+is not counted; only a single bubble appearing at the end of the transcript is.
 
 The numbers refresh every five minutes in the background, so the toolbar badge and
 the popup are current even when no claude.ai tab is open. When a claude.ai tab is
@@ -109,7 +128,8 @@ brings the box back whenever you want it.
 - Hotkey to show or hide the bar: `Ctrl/Cmd + Shift + U`. Rebind at
   `chrome://extensions/shortcuts`.
 - If the bar ever shows 0% on a multi-org account, open Settings → Change → pick
-  the account with your real usage.
+  the account with your real usage. Accounts Claude reports no usage for are
+  listed there as "no usage reported (free plan)".
 
 ## Permissions
 
@@ -141,7 +161,16 @@ and two security headers.
 ## Caveats
 
 These endpoints are undocumented and not officially supported by Anthropic. If
-Claude changes them, the bar may show `–` or `!` until updated.
+Claude changes them, the bar may show `–` or `!` until updated. The payload reader
+accepts a few shapes beyond the current one (`used`/`limit` and `remaining`/`limit`
+as well as `utilization`, epoch or ISO reset times, and the camelCase spellings of
+each key), so a rename degrades to a slightly different reading rather than to a
+blank bar.
+
+The free-plan count is an approximation by construction: it starts when you
+install rather than when the window did, so the first window can read low, and
+Claude's free cap is not published and varies with demand, which is why no
+percentage is shown against it.
 
 ## License
 

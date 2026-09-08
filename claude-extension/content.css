@@ -82,6 +82,18 @@
 #cub-bar .cub-fill.cub-high { background: var(--cub-high); }
 
 #cub-bar .cub-val { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Free plan: no percentage exists, so the bar's grid column carries a short
+   note instead. Exactly one of .cub-track / .cub-note is ever unhidden, and
+   [hidden] takes the other out of the grid entirely, so the four columns still
+   line up with the paid rows above and below. */
+#cub-bar .cub-note {
+  min-width: 0; font-size: 10px; opacity: 0.55;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* .cub-track sets display:block, which outranks the UA sheet's [hidden] rule,
+   so hiding it has to be said here. */
+#cub-bar .cub-track[hidden], #cub-bar .cub-note[hidden] { display: none; }
 #cub-bar .cub-reset { text-align: left; font-size: 10px; opacity: 0.55; white-space: nowrap; overflow: hidden; }
 
 /* Design 2: compact inline widget that sits in the composer toolbar, between the
@@ -104,6 +116,11 @@
 
 #cub-inline .cub-i-seg { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 #cub-inline .cub-i-seg[hidden] { display: none; }
+#cub-inline .cub-i-bar[hidden], #cub-inline .cub-i-ring[hidden] { display: none; }
+/* Free plan: "12 msg · 2h 41m", with no indicator to fill. */
+#cub-inline .cub-i-reset { font-size: 10px; opacity: 0.55; white-space: nowrap; }
+#cub-inline .cub-i-reset[hidden] { display: none; }
+#cub-inline .cub-i-reset::before { content: "\00b7"; margin-right: 6px; opacity: 0.7; }
 #cub-inline .cub-i-val { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 #cub-inline .cub-i-bar {
@@ -133,7 +150,7 @@
 /* Numbers we could not refresh: still shown (they are the best we have) but
    faded, with the tooltip saying how old they are. */
 #cub-bar.cub-stale .cub-val, #cub-bar.cub-stale .cub-reset,
-#cub-inline.cub-stale .cub-i-val { opacity: 0.45; }
+#cub-inline.cub-stale .cub-i-val, #cub-inline.cub-stale .cub-i-reset { opacity: 0.45; }
 #cub-bar.cub-stale .cub-fill, #cub-inline.cub-stale .cub-i-fill,
 #cub-inline.cub-stale .cub-i-ring-fill { opacity: 0.5; }
 

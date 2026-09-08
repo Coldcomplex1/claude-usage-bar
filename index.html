@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Claude Usage Bar</title>
-<meta name="description" content="A small Chrome extension that shows your Claude.ai usage, your 5 hour session and your weekly limits, in a slim bar under the chat box. No sign-in, no tokens, nothing leaves your browser." />
+<meta name="description" content="A small Chrome extension that shows your Claude.ai usage, your 5 hour session and your weekly limits, in a slim bar under the chat box. On the free plan it counts your messages in the 5 hour window instead. No sign-in, no tokens, nothing leaves your browser." />
 <meta property="og:title" content="Claude Usage Bar" />
 <meta property="og:description" content="See how much Claude you have left, right under the chat box." />
 <meta property="og:type" content="website" />
@@ -874,7 +874,7 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
         </details>
         <details>
           <summary>Do I need an API key or a paid plan?</summary>
-          <p>Neither. It reads the usage of whatever Claude account you are already signed in to, free or paid. There is nothing to buy and nothing to paste in.</p>
+          <p>Neither. There is nothing to buy and nothing to paste in. On a paid plan it reads your real percentages straight from Claude. On the free plan Claude publishes no usage figures at all, so there is nothing to read: the bar counts the messages you send in the current 5-hour window instead, and shows the countdown to when that window rolls over.</p>
         </details>
         <details>
           <summary>Does it slow Claude down?</summary>
@@ -882,7 +882,7 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
         </details>
         <details>
           <summary>The bar shows a dash, or an exclamation mark.</summary>
-          <p>A dash means it has no numbers yet, usually because you are signed out. An exclamation mark means the request failed. Refreshing claude.ai fixes most of it. If it sticks around, Claude may have changed something on their end.</p>
+          <p>A dash means it has no numbers yet, usually because you are signed out. An exclamation mark means the request failed. Refreshing claude.ai fixes most of it. If it sticks around, Claude may have changed something on their end. A free account is not this case: it shows a message count rather than a dash, because Claude reports no percentage to show.</p>
         </details>
         <details>
           <summary>Can this break?</summary>
