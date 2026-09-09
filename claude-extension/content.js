@@ -10,6 +10,10 @@
 // install tab without answering; see the section above fetchAndStore().
 // Session + All models are user-toggleable; Opus shows automatically only if the
 // account has it. Colors: blue < 30%, Claude orange 30-80%, red > 80%.
+// On a free account Claude reports no percentages at all (usage.js sets
+// `reported: false`), so the widget switches to the count readout instead of
+// showing a row of dashes forever: one row, the messages counted in the current
+// 5-hour window, and the countdown to when it rolls over. See session.js.
 
 (function () {
   var TOGGLE_KEY = "cub_enabled";
@@ -18,6 +22,7 @@
   var DESIGN_KEY = "cub_design";
   var BADGE_KEY = "cub_badge";
   var SETUP_KEY = "cub_setup";
+  var FREE_KEY = "cub_free_session";
 
   var TICK_MS = 30000;             // repaint the countdown; also the refetch check
   var POLL_MS = 60000;             // how stale the numbers may get before we refetch
@@ -29,6 +34,7 @@
   var inFlight = null;   // in-progress fetch, so the poll and the background alarm share one
   var show = { session: true, allModels: true };
   var design = "1";
+  var freeStore = null;   // raw cub_free_session; summarized per paint so the window rolls
 
   // session/opus use a bar in Design 1; in Design 2 the weekly windows use a ring.
   var SEGS = [
@@ -40,6 +46,43 @@
   function colorClass(p){ return p > 80 ? "cub-high" : p >= 30 ? "cub-mid" : "cub-low"; }
   function pctOf(d){ return Math.max(0, Math.min(100, Math.round(d.pct))); }
   function hasData(d){ return !!(d && d.available && d.pct != null); }
+
+  // Claude answered, with no usage in it: the free plan. Explicitly false, so a
+  // reading from before this version (which has no `reported` field) still
+  // renders the way it always did rather than flipping to the count readout.
+  function isFree(){ return !!lastData && lastData.reported === false; }
+  function freeNow(){ return CUBS.summarize(freeStore); }
+  function plural(n, word){ return n + " " + word + (n === 1 ? "" : "s"); }
+
+  var FREE_NOTE = "Free plan \u00b7 counted locally";
+  var FREE_WHY = "Claude publishes no usage percentage on the free plan, so this counts the " +
+                 "messages you send in the rolling 5-hour window. Counting starts when the " +
+                 "extension is installed, so the first window can read low.";
+
+  function freeTip(){
+    var f = freeNow();
+    var t = "Session (5h): ";
+    t += f.count ? plural(f.count, "message") + " counted in this window" : "no messages counted yet";
+    var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
+    if (left) t += ", resets in " + left + (CUB.fmtResetAt(f.resetAt) ? " (" + CUB.fmtResetAt(f.resetAt) + ")" : "");
+    return t + "\n" + FREE_WHY;
+  }
+
+  function freeAria(){
+    var f = freeNow();
+    var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
+    return "Session: " + plural(f.count, "message") + " counted in this 5-hour window" +
+           (left ? ", resets in " + left : "") + ". No percentage on the free plan.";
+  }
+
+  // A count is not a meter, so the row stops claiming to be one.
+  function setCount(node){
+    node.removeAttribute("aria-valuenow");
+    node.setAttribute("role", "status");
+    node.setAttribute("aria-valuetext", freeAria());
+    node.setAttribute("aria-label", freeAria());
+    node.setAttribute("title", freeTip());
+  }
 
   // Hover text: the number, the countdown, the wall-clock time it lands on, what
   // the window means, and how old the reading is. Cheap enough to rebuild on
@@ -65,6 +108,7 @@
 
   // ARIA progress state, so a screen reader reads a meter rather than loose text.
   function setProgress(node, d, s){
+    node.setAttribute("role", "progressbar");
     if (!hasData(d)){ node.removeAttribute("aria-valuenow"); }
     else node.setAttribute("aria-valuenow", String(pctOf(d)));
     node.setAttribute("aria-valuetext", ariaFor(s, d));
@@ -155,6 +199,7 @@
     return '<div class="cub-seg" role="progressbar" aria-valuemin="0" aria-valuemax="100" data-seg="'+s.key+'">'+
       '<span class="cub-label"><span class="cub-name">'+s.label+'</span> <span class="cub-sub">'+s.sub+'</span></span>'+
       '<span class="cub-track"><span class="cub-fill"></span></span>'+
+      '<span class="cub-note" hidden></span>'+
       '<span class="cub-val">–</span>'+
       '<span class="cub-reset"></span>'+
     '</div>';
@@ -167,10 +212,24 @@
     return bar;
   }
 
+  // The free readout, in the same four columns: the note stands in for the bar
+  // (exactly one of the two is ever in the grid, so nothing shifts).
+  function fillCountSeg(node){
+    var f = freeNow();
+    node.querySelector(".cub-track").hidden = true;
+    var note = node.querySelector(".cub-note");
+    note.hidden = false; note.textContent = FREE_NOTE;
+    node.querySelector(".cub-val").textContent = f.count + " msg";
+    node.querySelector(".cub-reset").textContent = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
+    setCount(node);
+  }
+
   function fillSeg(node, d, s){
     var val = node.querySelector(".cub-val");
     var fill = node.querySelector(".cub-fill");
     var reset = node.querySelector(".cub-reset");
+    node.querySelector(".cub-track").hidden = false;
+    node.querySelector(".cub-note").hidden = true;
     if (!hasData(d)){
       val.textContent = "–"; fill.style.width = "0%"; fill.className = "cub-fill"; reset.textContent = "";
       setProgress(node, d, s);
@@ -186,14 +245,18 @@
 
   function renderBar(){
     if (!barEl) return;
+    var free = isFree();
     var any = false;
     SEGS.forEach(function(s){
       var node = barEl.querySelector('[data-seg="'+s.key+'"]');
       if (!node) return;
       var d = lastData ? lastData[s.key] : null;
-      var canShow = s.opus ? hasData(d) : (show[s.key] !== false);
+      // Free: only the session row, and only as a count. The weekly windows do
+      // not exist on that plan, so there is nothing honest to put in them.
+      var canShow = free ? (s.key === "session" && show.session !== false)
+                  : s.opus ? hasData(d) : (show[s.key] !== false);
       node.hidden = !canShow;
-      if (canShow){ any = true; fillSeg(node, d, s); }
+      if (canShow){ any = true; free ? fillCountSeg(node) : fillSeg(node, d, s); }
     });
     barEl.classList.toggle("cub-stale", isStale());
     barEl.style.display = any ? "" : "none";
@@ -295,7 +358,8 @@
     var val = '<span class="cub-i-val">–</span>';
     // Bar window reads value-then-bar; ring windows read ring-then-value.
     var inner = s.ring ? (indicator + val) : (val + indicator);
-    return '<span class="cub-i-seg" role="progressbar" aria-valuemin="0" aria-valuemax="100" data-seg="'+s.key+'">'+ inner +'</span>';
+    return '<span class="cub-i-seg" role="progressbar" aria-valuemin="0" aria-valuemax="100" data-seg="'+s.key+'">'+
+      inner + '<span class="cub-i-reset" hidden></span></span>';
   }
 
   function buildInline(){
@@ -305,8 +369,24 @@
     return el;
   }
 
+  // Free, compact: "12 msg \u00b7 2h 41m". No indicator, because there is no
+  // percentage to indicate.
+  function fillCountInlineSeg(node){
+    var f = freeNow();
+    var ind = node.querySelector(".cub-i-ring") || node.querySelector(".cub-i-bar");
+    if (ind) ind.hidden = true;
+    node.querySelector(".cub-i-val").textContent = f.count + " msg";
+    var reset = node.querySelector(".cub-i-reset");
+    reset.hidden = false;
+    reset.textContent = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
+    setCount(node);
+  }
+
   function fillInlineSeg(node, d, s){
     var val = node.querySelector(".cub-i-val");
+    var ind0 = node.querySelector(".cub-i-ring") || node.querySelector(".cub-i-bar");
+    if (ind0) ind0.hidden = false;
+    node.querySelector(".cub-i-reset").hidden = true;
     if (!hasData(d)){
       val.textContent = "–";
       if (s.ring){
@@ -337,14 +417,16 @@
 
   function renderInline(){
     if (!inlineEl) return;
+    var free = isFree();
     var any = false;
     SEGS.forEach(function(s){
       var node = inlineEl.querySelector('[data-seg="'+s.key+'"]');
       if (!node) return;
       var d = lastData ? lastData[s.key] : null;
-      var canShow = s.opus ? hasData(d) : (show[s.key] !== false);
+      var canShow = free ? (s.key === "session" && show.session !== false)
+                  : s.opus ? hasData(d) : (show[s.key] !== false);
       node.hidden = !canShow;
-      if (canShow){ any = true; fillInlineSeg(node, d, s); }
+      if (canShow){ any = true; free ? fillCountInlineSeg(node) : fillInlineSeg(node, d, s); }
     });
     inlineEl.classList.toggle("cub-stale", isStale());
     inlineEl.style.display = any ? "" : "none";
@@ -549,6 +631,17 @@
 
   function render(){ design === "2" ? renderInline() : renderBar(); }
 
+  // Count sends only on an account that has nothing to fetch. A paid account
+  // never starts the observer, so it costs nothing there, and the counting
+  // stops by itself if a free account upgrades.
+  function syncFreeWatch(){
+    // Counting writes cub_free_session, and that write reaches the storage
+    // listener below in this tab as well as every other one, so the repaint is
+    // already handled there -- there is nothing for the callback to do.
+    if (enabled && isFree()) CUBS.watch(null);
+    else CUBS.unwatch();
+  }
+
   // A failed fetch keeps the last-known numbers on screen (they are still the best
   // information we have) and lets the stale styling and the tooltip say so. Only a
   // failure with nothing cached shows the bare error mark.
@@ -728,6 +821,7 @@
     inFlight = CUB.getUsage().then(function (data){
       lastData = data; fetchFailed = false;
       chrome.storage.local.set({ [LAST_KEY]: data });
+      syncFreeWatch();
       if (enabled) render();
       return data;
     });
@@ -776,15 +870,24 @@
     place(true);
     if (document.visibilityState === "visible") startPlacing();
     startPolling();
+    syncFreeWatch();
   }
   // The setup box only hides here: the extension being switched off is not an
   // answer, so it comes back with the bar if it is switched on again.
-  function disable(){ enabled = false; stopPolling(); stopPlacing(); removeWidgets(); hideSetup(); }
+  function disable(){
+    enabled = false; stopPolling(); stopPlacing(); removeWidgets(); hideSetup();
+    CUBS.unwatch();
+  }
 
   chrome.storage.onChanged.addListener(function (changes, area){
     if (area !== "local") return;
     if (changes[TOGGLE_KEY]) { changes[TOGGLE_KEY].newValue === false ? disable() : enable(); }
-    if (changes[LAST_KEY] && changes[LAST_KEY].newValue){ lastData = changes[LAST_KEY].newValue; if (enabled) render(); }
+    if (changes[LAST_KEY] && changes[LAST_KEY].newValue){
+      lastData = changes[LAST_KEY].newValue; syncFreeWatch(); if (enabled) render();
+    }
+    // Another tab counted a send, or this one did: repaint from the store
+    // rather than from whatever the counter handed back.
+    if (changes[FREE_KEY]){ freeStore = changes[FREE_KEY].newValue || null; if (enabled) render(); }
     if (changes[SHOW_KEY] && changes[SHOW_KEY].newValue){ show = Object.assign({ session:true, allModels:true }, changes[SHOW_KEY].newValue); if (enabled) render(); }
     if (changes[DESIGN_KEY]) { switchDesign(changes[DESIGN_KEY].newValue === "2" ? "2" : "1"); }
     // Answered somewhere else (the install tab, or another claude.ai tab): close
@@ -818,8 +921,9 @@
     refresh(FOCUS_MAX_AGE_MS);
   });
 
-  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, SHOW_KEY, DESIGN_KEY, SETUP_KEY], function (o){
+  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, SHOW_KEY, DESIGN_KEY, SETUP_KEY, FREE_KEY], function (o){
     if (o[LAST_KEY]) lastData = o[LAST_KEY];
+    if (o[FREE_KEY]) freeStore = o[FREE_KEY];
     if (o[SHOW_KEY]) show = Object.assign(show, o[SHOW_KEY]);
     // Design 1 stays the fallback while setup is pending, so the bar works from
     // the moment of install rather than waiting on an answer that may not come.

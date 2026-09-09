@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claude Usage Bar: Track Your Claude.ai Usage in Chat",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "See your Claude.ai usage (5-hour session and weekly all-models) in a slim bar under the chat. No sign-in or tokens.",
   "permissions": ["storage", "alarms"],
   "host_permissions": ["https://claude.ai/*"],
@@ -22,7 +22,7 @@
   "content_scripts": [
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["usage.js", "content.js"],
+      "js": ["usage.js", "session.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

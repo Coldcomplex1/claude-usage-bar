@@ -75,7 +75,18 @@ async function refreshAccount(force){
   } catch (e){ /* keep the cached name we already showed */ }
 }
 
-function pctText(b){ return b && b.utilization!=null ? Math.round(Number(b.utilization))+"%" : "–"; }
+function pctText(w){ return w && w.available ? Math.round(w.pct)+"%" : "–"; }
+
+// What to say under an account name in the picker. An account Claude reports no
+// usage for is the free plan, not a broken pick, so it says so rather than
+// offering two dashes and letting the user think they chose wrong.
+function orgDetail(r){
+  if (!r.ok) return "error: " + (r.error || "?");
+  var w = r.windows || {};
+  if (!(w.session && w.session.available) && !(w.allModels && w.allModels.available) &&
+      !(w.opus && w.opus.available)) return "no usage reported (free plan)";
+  return "5h " + pctText(w.session) + " · 7d " + pctText(w.allModels);
+}
 
 function el(tag, cls, text){
   var n = document.createElement(tag);
@@ -104,9 +115,7 @@ async function showScan(){
       var row = el("div", "p-org");
       var info = el("div", "p-org-info");
       info.appendChild(el("div", "p-org-name", r.name));
-      info.appendChild(el("div", "p-org-detail", r.ok
-        ? "5h " + pctText(r.raw.five_hour) + " · 7d " + pctText(r.raw.seven_day)
-        : "error: " + (r.error || "?")));
+      info.appendChild(el("div", "p-org-detail", orgDetail(r)));
       var btn = el("button", "p-btn p-use", "Use");
       btn.addEventListener("click", async function(){
         await CUB.setManualOrg(r.uuid);

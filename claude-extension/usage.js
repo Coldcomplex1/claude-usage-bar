@@ -8,11 +8,21 @@
 //
 // Key fix vs v1: an account can belong to several orgs; we probe each org's
 // usage and lock onto the one with real data/activity, and let the user override.
+//
+// Claude only fills those windows in for paid plans. On a free account the
+// endpoint answers, but with nothing in it, which used to leave every surface
+// painting "-" forever with no way to tell that apart from an outage. So a
+// result now carries `reported`: false means "Claude told us nothing", and the
+// free-plan readout in session.js takes over. `plan` (read from the org's
+// capabilities) only ever words the message -- the presence of real windows is
+// what decides which readout is shown, so an unfamiliar capability list can
+// never demote a paying account to the free view.
 
 var CUB = (function () {
-  var AUTO_KEY = "cub_org";          // {id,name,ts} auto-detected
+  var AUTO_KEY = "cub_org";          // {id,name,caps,ts} auto-detected
   var MANUAL_KEY = "cub_org_manual"; // user-chosen uuid (string), wins over auto
   var DEBUG_KEY = "cub_debug_on";    // opt-in: keep the raw payload in storage
+  var FORCE_KEY = "cub_debug_plan";  // test hook: "free" forces the not-reported path
   var ORG_TTL_MS = 6 * 60 * 60 * 1000;
   var API = "https://claude.ai/api";
 
@@ -31,16 +41,112 @@ var CUB = (function () {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(15000)
     });
-    if (res.status === 401 || res.status === 403){ var a=new Error("AUTH"); a.code="AUTH"; a.status=res.status; throw a; }
+    // 401 is "logged out" and 403 is not: a free account, or an org the session
+    // may not read, answers 403 while the login is perfectly good. They used to
+    // share the AUTH code, which is why a signed-in free user was told to sign in.
+    if (res.status === 401){ var a=new Error("AUTH"); a.code="AUTH"; a.status=401; throw a; }
+    if (res.status === 403){ var f=new Error("FORBIDDEN"); f.code="FORBIDDEN"; f.status=403; throw f; }
     if (!res.ok){ var h=new Error("HTTP_"+res.status); h.code="HTTP"; h.status=res.status; throw h; }
     return res.json();
   }
 
-  function avail(b){ return b && typeof b==="object" && b.utilization != null; }
-  function maxUtil(u){
-    var vals = [u && u.five_hour, u && u.seven_day, u && u.seven_day_opus]
-      .map(function(b){ return avail(b) ? Number(b.utilization) : -1; });
-    return Math.max.apply(null, vals.concat(-1));
+  // ---- Reading a usage window ----------------------------------------------
+  // Claude sends a percentage today. Accept the other ways the same fact can be
+  // written (used/limit, remaining/limit) and the other spellings of the reset
+  // key, so a renamed field degrades to a slightly-off reading rather than to a
+  // blank bar -- and so a free-plan payload in some other shape is picked up.
+
+  var FIVE_HOUR = ["five_hour", "fiveHour", "five_hour_limit", "session"];
+  var SEVEN_DAY = ["seven_day", "sevenDay", "seven_day_limit", "week", "weekly"];
+  var SEVEN_DAY_OPUS = ["seven_day_opus", "sevenDayOpus", "seven_day_opus_limit", "opus"];
+
+  function pick(data, names){
+    if (!data || typeof data !== "object") return null;
+    for (var i = 0; i < names.length; i++){
+      var v = data[names[i]];
+      if (v && typeof v === "object") return v;
+    }
+    return null;
+  }
+
+  function num(v){
+    if (typeof v === "number") return isFinite(v) ? v : null;
+    if (typeof v === "string" && v.trim() !== "" && isFinite(Number(v))) return Number(v);
+    return null;
+  }
+
+  // ISO out, whatever went in: an ISO string, or epoch in seconds or ms.
+  function toIso(v){
+    if (v == null) return null;
+    if (typeof v === "string"){
+      if (isNaN(new Date(v).getTime())) return null;
+      return v;
+    }
+    var n = num(v);
+    if (n == null) return null;
+    if (n < 1e11) n *= 1000;              // seconds, not milliseconds
+    var d = new Date(n);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  function resetOf(b){
+    var keys = ["resets_at", "reset_at", "resetsAt", "resetAt", "resets_at_utc"];
+    for (var i = 0; i < keys.length; i++){
+      var iso = toIso(b[keys[i]]);
+      if (iso) return iso;
+    }
+    return null;
+  }
+
+  // The percentage this window is at, or null when the payload does not say.
+  function pctOf(b){
+    var u = num(b.utilization);
+    if (u != null) return u;
+    var limit = num(b.limit != null ? b.limit : b.total);
+    if (limit != null && limit > 0){
+      var used = num(b.used != null ? b.used : b.usage);
+      if (used != null) return (used / limit) * 100;
+      var left = num(b.remaining != null ? b.remaining : b.remaining_count);
+      if (left != null) return (1 - left / limit) * 100;
+    }
+    return null;
+  }
+
+  function readWindow(b){
+    if (!b || typeof b !== "object") return { available:false, pct:null, resetAt:null };
+    var pct = pctOf(b);
+    if (pct == null) return { available:false, pct:null, resetAt:null };
+    return { available:true, pct: Math.max(0, Math.min(100, pct)), resetAt: resetOf(b) };
+  }
+
+  // The three windows of a raw payload, in the shape the rest of the extension
+  // speaks. Exported because the Settings account-picker reads raw rows too.
+  function summarize(data){
+    return {
+      session:   readWindow(pick(data, FIVE_HOUR)),
+      allModels: readWindow(pick(data, SEVEN_DAY)),
+      opus:      readWindow(pick(data, SEVEN_DAY_OPUS))
+    };
+  }
+
+  function anyWindow(s){ return !!(s.session.available || s.allModels.available || s.opus.available); }
+  function maxUtil(s){
+    return Math.max.apply(null, [s.session, s.allModels, s.opus]
+      .map(function(w){ return w.available ? w.pct : -1; }).concat(-1));
+  }
+
+  // ---- Plan ----------------------------------------------------------------
+  // Wording only. Which readout appears is decided by whether real windows came
+  // back, never by this, so an unrecognised capability list is harmless.
+  function planFromCaps(caps){
+    if (!Array.isArray(caps)) return "unknown";
+    function has(c){ return caps.indexOf(c) !== -1; }
+    if (has("claude_max")) return "max";
+    if (has("claude_pro")) return "pro";
+    if (has("claude_enterprise") || has("enterprise")) return "enterprise";
+    if (has("claude_team") || has("team")) return "team";
+    if (has("chat")) return "free";
+    return "unknown";
   }
 
   async function listOrgs(){
@@ -55,8 +161,13 @@ var CUB = (function () {
   async function scanOrgs(){
     var orgs = await listOrgs();
     var rows = await Promise.all(orgs.map(async function(o){
-      var row = { uuid:o.uuid, name:o.name || "(unnamed)", ok:false, raw:null, error:null };
-      try { row.raw = await fetchJson(API + "/organizations/" + o.uuid + "/usage"); row.ok = true; }
+      var row = { uuid:o.uuid, name:o.name || "(unnamed)", caps:o.capabilities || null,
+                  plan:planFromCaps(o.capabilities), ok:false, raw:null, windows:null, error:null };
+      try {
+        row.raw = await fetchJson(API + "/organizations/" + o.uuid + "/usage");
+        row.windows = summarize(row.raw);
+        row.ok = true;
+      }
       catch (e) { row.error = e.code || "ERR"; }
       return row;
     }));
@@ -64,16 +175,21 @@ var CUB = (function () {
     var best = null, bestScore = -2;
     rows.forEach(function(row){
       if (!row.ok) return;
-      var u = row.raw;
-      var has = avail(u.five_hour) || avail(u.seven_day) || avail(u.seven_day_opus);
-      var mu = maxUtil(u);
-      var score = (has ? 1000 : 0) + (mu >= 0 ? mu : 0);
-      if (score > bestScore){ bestScore = score; best = { id:row.uuid, name:row.name, usage:u }; }
+      var mu = maxUtil(row.windows);
+      var score = (anyWindow(row.windows) ? 1000 : 0) + (mu >= 0 ? mu : 0);
+      if (score > bestScore){
+        bestScore = score;
+        best = { id:row.uuid, name:row.name, caps:row.caps, usage:row.raw };
+      }
     });
 
     if (!best){
       var chat = orgs.find(function(o){ return Array.isArray(o.capabilities) && o.capabilities.indexOf("chat")!==-1; }) || orgs[0];
-      best = { id: chat.uuid, name: chat.name || "", usage: null };
+      best = { id: chat.uuid, name: chat.name || "", caps: chat.capabilities || null, usage: null,
+               // Every org answered, none of them with usage: not an outage, and
+               // not a login problem either. Say so rather than falling through
+               // to the generic failure text.
+               reason: rows.every(function(r){ return !r.ok; }) ? "NO_WINDOWS" : null };
     }
     await sset({ cub_scan: { rows: rows, at: Date.now() } });
     return { rows: rows, best: best };
@@ -82,28 +198,28 @@ var CUB = (function () {
   async function resolveOrg(){
     var st = await sget([AUTO_KEY, MANUAL_KEY]);
     if (st[MANUAL_KEY]){
-      var nm = (st[AUTO_KEY] && st[AUTO_KEY].id === st[MANUAL_KEY]) ? st[AUTO_KEY].name : "";
-      return { id: st[MANUAL_KEY], name: nm, manual: true };
+      var cached = (st[AUTO_KEY] && st[AUTO_KEY].id === st[MANUAL_KEY]) ? st[AUTO_KEY] : null;
+      return { id: st[MANUAL_KEY], name: cached ? cached.name : "", caps: cached ? cached.caps : null, manual: true };
     }
     if (st[AUTO_KEY] && st[AUTO_KEY].id && (Date.now() - st[AUTO_KEY].ts) < ORG_TTL_MS){
-      return { id: st[AUTO_KEY].id, name: st[AUTO_KEY].name };
+      return { id: st[AUTO_KEY].id, name: st[AUTO_KEY].name, caps: st[AUTO_KEY].caps };
     }
     var scan = await scanOrgs();
-    await sset({ [AUTO_KEY]: { id: scan.best.id, name: scan.best.name, ts: Date.now() } });
-    return { id: scan.best.id, name: scan.best.name, prefetched: scan.best.usage };
+    await sset({ [AUTO_KEY]: { id: scan.best.id, name: scan.best.name, caps: scan.best.caps, ts: Date.now() } });
+    return { id: scan.best.id, name: scan.best.name, caps: scan.best.caps,
+             prefetched: scan.best.usage, reason: scan.best.reason };
   }
 
-  function normalize(b){
-    if (!avail(b)) return { available:false, pct:null, resetAt:null };
-    var resetAt = b.resets_at != null ? b.resets_at : (b.reset_at != null ? b.reset_at : null);
-    return { available:true, pct:Number(b.utilization), resetAt:resetAt };
-  }
-
-  function toResult(data, org){
+  function toResult(data, org, reason){
+    var w = summarize(data);
+    var reported = anyWindow(w);
     return {
-      session:   normalize(data.five_hour),
-      allModels: normalize(data.seven_day),
-      opus:      normalize(data.seven_day_opus),
+      session: w.session, allModels: w.allModels, opus: w.opus,
+      // false = Claude answered with no usage in it (the free plan). The bar
+      // shows the locally-counted session instead of a row of dashes.
+      reported: reported,
+      reason: reported ? null : (reason || "NO_WINDOWS"),
+      plan: planFromCaps(org.caps),
       orgName: org.name || "", orgId: org.id, fetchedAt: Date.now()
     };
   }
@@ -111,15 +227,22 @@ var CUB = (function () {
   async function fetchUsage(){
     var org = await resolveOrg();
     var data = org.prefetched || null;
+    var reason = org.reason || null;
     if (!data){
       try { data = await fetchJson(API + "/organizations/" + org.id + "/usage"); }
       catch (e){
-        if (e.code === "HTTP" && (e.status === 404 || e.status === 403)){
+        if (e.code === "FORBIDDEN" || (e.code === "HTTP" && e.status === 404)){
           await sdel([AUTO_KEY]);                 // stale auto pick -> rescan
           var scan = await scanOrgs();
-          org = { id: scan.best.id, name: scan.best.name };
-          await sset({ [AUTO_KEY]: { id: org.id, name: org.name, ts: Date.now() } });
-          data = scan.best.usage || await fetchJson(API + "/organizations/" + org.id + "/usage");
+          org = { id: scan.best.id, name: scan.best.name, caps: scan.best.caps };
+          await sset({ [AUTO_KEY]: { id: org.id, name: org.name, caps: org.caps, ts: Date.now() } });
+          if (scan.best.usage) data = scan.best.usage;
+          else if (scan.best.reason === "NO_WINDOWS"){
+            // Listing the orgs worked, so the session is fine; every usage probe
+            // was refused. Report an empty reading, not a failure.
+            data = {}; reason = "NO_WINDOWS";
+          }
+          else data = await fetchJson(API + "/organizations/" + org.id + "/usage");
         } else throw e;
       }
     }
@@ -127,9 +250,11 @@ var CUB = (function () {
     // The raw payload used to be written to storage on every single fetch, which
     // on an open tab meant a disk write a minute for something only a bug report
     // ever reads. It is now opt-in (set cub_debug_on to keep it).
-    var dbg = await sget([DEBUG_KEY]);
+    var dbg = await sget([DEBUG_KEY, FORCE_KEY]);
     if (dbg[DEBUG_KEY]) await sset({ cub_debug: { orgName: org.name, orgId: org.id, raw: data, at: Date.now() } });
-    return toResult(data, org);
+    // Test hook: the free path is otherwise unreachable from a paid account.
+    if (dbg[FORCE_KEY]) return toResult({}, org, "NO_WINDOWS");
+    return toResult(data, org, reason);
   }
 
   // One request per burst: the popup, the options page and a background ping can
@@ -179,5 +304,6 @@ var CUB = (function () {
   }
 
   return { getUsage:getUsage, scanOrgs:scanOrgs, setManualOrg:setManualOrg, clearOrg:clearOrg,
+           summarize:summarize, planFromCaps:planFromCaps,
            fmtReset:fmtReset, fmtResetAt:fmtResetAt, fmtAgo:fmtAgo };
 })();

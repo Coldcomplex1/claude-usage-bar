@@ -16,7 +16,9 @@
 
   <p>Claude Usage Bar is a browser extension that displays your Claude.ai usage
   limits (your current 5-hour session and weekly all-models usage, and an Opus
-  allowance if your plan has one) in a small bar under the chat.</p>
+  allowance if your plan has one) in a small bar under the chat. On the free plan,
+  where Claude publishes no usage figures, it instead counts the messages you send
+  in the current 5-hour window; see “Counting on the free plan” below.</p>
 
   <h2>What the extension accesses</h2>
   <p>While you are signed in to claude.ai, the extension reads your usage data from
@@ -25,11 +27,24 @@
     <li>Your organization id and name (to address the correct usage endpoint).</li>
     <li>Your usage figures: utilization percentages and reset times for the
       5-hour, 7-day (all models), and Opus windows.</li>
+    <li>Which plan your account is on, taken from the capabilities your
+      organization already reports, so the bar can say why there are no
+      percentages on the free plan.</li>
   </ul>
   <p>These reads happen roughly every five minutes for as long as the extension is
   installed and enabled, including when no claude.ai tab is open, so that the
   numbers you see are current rather than left over from your last visit. They
   stop when you turn the extension off on its Settings page.</p>
+
+  <h2>Counting on the free plan</h2>
+  <p>Claude does not publish usage percentages for free accounts, so there is
+  nothing to read. To still show something useful, the extension counts the
+  messages you send: it watches the page for new message bubbles appearing in the
+  conversation and records a timestamp for each one. It never reads, stores, or
+  transmits what any message says — only a running count and the times, which are
+  kept in your browser and discarded once they fall outside the rolling 5-hour
+  window. This counting runs only on accounts where Claude reports no usage; on a
+  paid plan it never starts.</p>
 
   <h2>How the data is used and stored</h2>
   <p>This data is used only to render the usage bar and the extension’s popup. It is
@@ -45,7 +60,9 @@
     <li>We do not sell or transfer your data to anyone.</li>
     <li>We do not use your data for advertising, profiling, creditworthiness, or
       any purpose unrelated to showing your usage.</li>
-    <li>We do not read, store, or transmit the content of your conversations.</li>
+    <li>We do not read, store, or transmit the content of your conversations. On
+      the free plan we count how many messages you have sent, as described above,
+      and never what they contain.</li>
   </ul>
 
   <h2>Permissions</h2>

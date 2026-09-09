@@ -12,6 +12,8 @@ body {
 
 .p-rows { display: flex; flex-direction: column; gap: 12px; min-height: 40px; }
 .p-empty { opacity: 0.6; font-size: 12px; padding: 8px 0; }
+/* Free plan: an explanation under the count, not an empty state. */
+.p-note { opacity: 0.6; font-size: 11px; line-height: 1.45; padding: 6px 0 0; }
 .p-row-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 5px; }
 .p-label { font-weight: 600; }
 .p-sub { font-size: 10px; opacity: 0.5; }
