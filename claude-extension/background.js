@@ -125,6 +125,8 @@ function titleFor(data, free){
         : "Claude reports no usage percentage on the free plan.";
     }
     return base + head +
+      (free && free.sendsLeft != null && !free.exact
+        ? " \u00b7 about " + free.sendsLeft + " left at this pace" : "") +
       (left ? " \u00b7 resets in " + left : "") + "\n" + why +
       // Not "Updated": the readout above is live, and this timestamp dates only
       // the once-a-day check for a percentage, which is hours old by design.

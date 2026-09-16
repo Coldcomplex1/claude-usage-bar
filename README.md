@@ -120,6 +120,20 @@ stored, never the text it was measured from. If the page changes shape and the
 measurement stops working, every send costs the same flat amount and the estimate
 degrades to the count-based one rather than reading as no usage at all.
 
+Two readings fall out of the cost model that need no limit at all, and so are
+there on a free account's first day, before Claude has said anything:
+
+- **What this conversation costs.** The next send in a long chat can cost several
+  times one in a fresh chat, and the tooltip says so — "this chat costs about 4x a
+  message in a fresh one". Past about 3x it adds the one piece of advice available
+  on the free plan that actually saves anything: start a new chat, and the next
+  message is cheap again. Nothing else on the page will tell you that.
+- **How many sends are left at this pace.** Once there is a cap, the remainder is
+  divided by what the recent sends actually cost, rounded down. Two windows can
+  sit at the same percentage and have room for six more messages or one, and only
+  this says which — when Claude has stated a figure in messages, that figure wins
+  over the arithmetic.
+
 Four rules keep that honest:
 
 - **A number inside the conversation is never read as a limit.** Anything the
@@ -281,7 +295,12 @@ On the free plan the readout is only ever as good as what Claude has said:
   for code, which is denser than prose, and it is blind to how large an image or
   an uploaded file actually is — an upload can cost more than everything else in
   the window and the extension cannot see it. The burn-rate comparison it supports
-  is trustworthy well before the absolute percentage is.
+  is trustworthy well before the absolute percentage is, because a ratio between
+  two numbers computed the same way survives both of them being off.
+- **"At this pace" means the last three sends.** A conversation that is about to
+  get much longer, or one you are about to abandon for a fresh chat, will not
+  match it. It answers "if I carry on exactly like this", which is the useful
+  question, not a prediction.
 - **The count is per browser profile.** Messages sent from the phone app, or from
   another browser, are invisible to it, which makes it a floor rather than a
   total. A figure from Claude is the only thing that corrects for this, because it

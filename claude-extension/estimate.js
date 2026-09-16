@@ -222,6 +222,26 @@ var CUBE = (function () {
   // a multiple OF.
   function baseCost(){ return costOf({ ctxChars: 200, replyChars: 900, images: 0 }); }
 
+  // The mean cost of the last few sends, which is what "at this pace" means.
+  // Sends that recorded no cost (measurement unavailable, or an older version)
+  // are skipped rather than counted as free.
+  function recentCost(recent){
+    if (!Array.isArray(recent) || !recent.length) return null;
+    var xs = recent.filter(function (u){ return typeof u === "number" && isFinite(u) && u > 0; });
+    if (!xs.length) return null;
+    var sum = 0;
+    for (var i = 0; i < xs.length; i++) sum += xs[i];
+    return sum / xs.length;
+  }
+
+  // How many more sends fit in what is left, at the cost the recent ones ran at.
+  // Rounded DOWN: promising one more message than there is room for is the wrong
+  // way round to be wrong.
+  function sendsLeft(remainingUnits, perSend){
+    if (!(remainingUnits > 0) || !(perSend > 0)) return null;
+    return Math.floor(remainingUnits / perSend);
+  }
+
   function median(xs){
     var v = xs.filter(function (x){ return typeof x === "number" && isFinite(x) && x > 0; })
               .sort(function (a, b){ return a - b; });
@@ -258,7 +278,12 @@ var CUBE = (function () {
   // Claude's own figure when it gave one, and is shown on its own when there is
   // no honest percentage to put it in -- which is no loss, because "5 left" is
   // what a person actually acts on mid-chat.
-  function estimate(summary, calib){
+  // A conversation costing this much more than a fresh one is worth saying
+  // something about: the cheapest real saving available on the free plan is to
+  // start a new chat, and nothing else on the page will tell you that.
+  var ADVISE_AT = 3;
+
+  function estimate(summary, calib, opts){
     var s = summary || { count: 0, units: 0, startedAt: null, resetAt: null };
     // `exact` is what earns a reading the right to drop the "~". Only a hard
     // stop gets it: Claude said outright there is nothing left, so 100 is a fact
@@ -274,10 +299,21 @@ var CUBE = (function () {
                 // This window has already run past every cap we have learned, so
                 // the cap moved and there is nothing honest to draw. Worth saying
                 // in words even though there is no bar.
-                pastLearned: false };
+                pastLearned: false,
+                // What the conversation on screen costs, as a multiple of a short
+                // message in a fresh chat. Needs the page, so it is passed in;
+                // null everywhere there is no page to measure.
+                burn: (opts && opts.burn > 0) ? opts.burn : null,
+                // Roughly how many more sends fit, at the cost the recent ones
+                // ran at. Needs a cap, so it is null until there is one.
+                sendsLeft: null,
+                // True when this conversation has grown expensive enough that
+                // starting a fresh one is worth suggesting.
+                advise: false };
 
     var obs = currentObs(calib, s);
     if (!obs) return learned(out, s, calib);
+
 
     if (obs.kind === "exhausted"){
       // Claude stopped us. Whatever our own count says, this window is spent --
@@ -286,12 +322,14 @@ var CUBE = (function () {
       // saying there is nothing left, which is why it needs no cap to be honest.
       out.confidence = "observed"; out.pct = 100; out.left = 0; out.exact = true;
       out.cap = obs.cap > 0 ? obs.cap : null;
-      return out;
+      return pace(out, s);
     }
 
     // Claude named a figure at a moment when we had counted obs.count. Anything
     // we have counted since comes off it.
-    if (!(obs.cap > 0)) return out;
+    // A malformed row should not also cost us the earlier windows' evidence, so
+    // this falls through to those rather than straight to the count.
+    if (!(obs.cap > 0)) return learned(out, s, calib);
     var thenLeft = obs.cap - obs.count;              // what Claude said was left
     var since = Math.max(0, out.count - obs.count);  // what we have sent since
     var left = Math.max(0, thenLeft - since);
@@ -319,11 +357,21 @@ var CUBE = (function () {
     // so does not depend on any of this.
     if (!obs.whole && !obs.stated){
       out.confidence = "observed";
-      return out;
+      return pace(out, s);
     }
     out.confidence = "observed";
     out.cap = obs.cap;
     out.pct = clamp(100 * (obs.cap - left) / obs.cap);
+    // Claude counted in messages here, so what is left already IS the answer --
+    // no pace arithmetic needed, and none that could contradict it.
+    out.sendsLeft = left;
+    return pace(out, s);
+  }
+
+  // The parts that are about rate rather than total. Kept in one place so every
+  // branch that learns a cap gets the same treatment.
+  function pace(out, s){
+    if (out.burn != null && out.burn >= ADVISE_AT) out.advise = true;
     return out;
   }
 
@@ -338,8 +386,11 @@ var CUBE = (function () {
   // only the unit figure knows the difference. Counts are the fallback for caps
   // learned before there was a cost model.
   function learned(out, s, calib){
+    // Nothing learned yet. Still goes through pace(): burn rate needs no cap, and
+    // on a free account with nothing calibrated it is the only useful thing there
+    // is to say.
     var rows = usableCaps(calib);
-    if (!rows.length) return out;
+    if (!rows.length) return pace(out, s);
 
     var capU = median(rows.map(function (r){ return r.unitsCap; }));
     var capN = median(rows.map(function (r){ return r.cap; }));
@@ -353,23 +404,28 @@ var CUBE = (function () {
     // window has run longer than the ones we have seen.
     var over = (capU && s.units > 0) ? s.units > capU
              : (capN ? (s.count || 0) > capN : false);
-    if (over){ out.pastLearned = true; return out; }
+    if (over){ out.pastLearned = true; return pace(out, s); }
 
     if (capU && s.units > 0){
       out.confidence = "estimated";
       out.cap = Math.round(capN || 0) || null;
       out.pct = clamp(100 * s.units / capU);
       out.basis = "units";
-      return out;
+      // How many more sends fit, at what the recent ones cost. This is the
+      // reading that actually changes behaviour: "about 6 left" answers the
+      // question someone mid-conversation is really asking.
+      out.sendsLeft = sendsLeft(capU - s.units, recentCost(s.recent));
+      return pace(out, s);
     }
     if (capN){
       out.confidence = "estimated";
       out.cap = Math.round(capN);
       out.pct = clamp(100 * (s.count || 0) / capN);
       out.basis = "count";
-      return out;
+      out.sendsLeft = Math.max(0, Math.floor(capN - (s.count || 0)));
+      return pace(out, s);
     }
-    return out;
+    return pace(out, s);
   }
 
   // Only caps we can stand behind: from a window we watched all of (or that
@@ -528,6 +584,24 @@ var CUBE = (function () {
     return costOf({ ctxChars: total, replyChars: replyChars, images: imagesIn() });
   }
 
+  // What the NEXT send in this conversation would cost, as a multiple of a short
+  // message in a fresh chat. This is the one number here that needs no cap, no
+  // observation and no history -- just the conversation on screen -- which makes
+  // it the only thing the extension can tell a free user on their first day.
+  //
+  // It is also the only advice on the page that is actionable: a long chat is
+  // expensive because its whole transcript is re-sent every turn, and starting a
+  // new one makes the next message cheap again.
+  function burnNow(){
+    var total = totalChars();
+    if (!total) return null;
+    var base = baseCost();
+    if (!(base > 0)) return null;
+    var next = costOf({ ctxChars: total, replyChars: 900, images: imagesIn() });
+    var b = next / base;
+    return isFinite(b) && b > 0 ? b : null;
+  }
+
   // The last reply of a window has no send after it to be measured by, and it is
   // often the longest. The existing 30-second heartbeat catches up: whatever the
   // transcript grew by since we last looked is that reply, and it is added to the
@@ -617,7 +691,8 @@ var CUBE = (function () {
            clockToIso: clockToIso, parseLimitText: parseLimitText,
            capFrom: capFrom, median: median, currentObs: currentObs, estimate: estimate,
            costOf: costOf, baseCost: baseCost, usableCaps: usableCaps,
-           costOfSend: costOfSend, costIdle: costIdle,
+           costOfSend: costOfSend, costIdle: costIdle, burnNow: burnNow,
+           recentCost: recentCost, sendsLeft: sendsLeft, ADVISE_AT: ADVISE_AT,
            CAP_TTL_MS: CAP_TTL_MS,
            readCalib: readCalib, recordCap: recordCap, clearCalib: clearCalib,
            installedAt: installedAt,

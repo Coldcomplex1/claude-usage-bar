@@ -613,6 +613,76 @@ test("capFrom: a hard stop measures the cap in units exactly", function (t){
   assert.strictEqual(soft.unitsCap, 37500);
 });
 
+// ===================================================================
+// estimate.js -- pace: the part that needs no denominator
+// ===================================================================
+
+test("recentCost: the mean of the last few sends, ignoring unpriced ones", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  assert.strictEqual(CUBE.recentCost([1000, 2000, 3000]), 2000);
+  // A send from before there was a cost model must not be averaged in as free.
+  assert.strictEqual(CUBE.recentCost([0, 0, 4000]), 4000);
+  assert.strictEqual(CUBE.recentCost([0, 0, 0]), null);
+  assert.strictEqual(CUBE.recentCost([]), null);
+  assert.strictEqual(CUBE.recentCost(null), null);
+});
+
+test("sendsLeft: rounds down, so it never promises room that is not there", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  assert.strictEqual(CUBE.sendsLeft(10000, 3000), 3);   // 3.33 -> 3
+  assert.strictEqual(CUBE.sendsLeft(2999, 3000), 0);
+  assert.strictEqual(CUBE.sendsLeft(0, 3000), null);
+  assert.strictEqual(CUBE.sendsLeft(-5, 3000), null);
+  assert.strictEqual(CUBE.sendsLeft(10000, 0), null);
+});
+
+test("estimate: says how many sends are left, at what the recent ones cost", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var now = Date.now(), start = now - HOUR;
+  var calib = { caps: [{ at: now - 8 * HOUR, cap: 20, unitsCap: 30000,
+                         whole: true, kind: "exhausted" }] };
+  // 18000 of 30000 spent; the last sends cost 4000 each, so three more fit.
+  var e = CUBE.estimate({ count: 6, units: 18000, recent: [4000, 4000, 4000], startedAt: start }, calib);
+  assert.strictEqual(e.confidence, "estimated");
+  assert.strictEqual(e.sendsLeft, 3);
+
+  // The same window with expensive recent sends has room for fewer, even though
+  // the bar is in exactly the same place. This is the reading a count cannot give.
+  var pricey = CUBE.estimate({ count: 6, units: 18000, recent: [12000, 12000], startedAt: start }, calib);
+  assert.strictEqual(pricey.pct, e.pct);
+  assert.strictEqual(pricey.sendsLeft, 1);
+});
+
+test("estimate: Claude's own count of what is left wins over any pace maths", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var start = Date.now() - HOUR;
+  var calib = { caps: [{ at: start + 1, cap: 25, count: 20, kind: "remaining", whole: true }] };
+  var e = CUBE.estimate({ count: 22, units: 90000, recent: [30000], startedAt: start }, calib);
+  assert.strictEqual(e.sendsLeft, 3, "Claude counted in messages, so that is the answer");
+  assert.strictEqual(e.left, 3);
+});
+
+test("estimate: burn rate needs no cap, and drives the new-chat advice", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var start = Date.now() - HOUR;
+  var s = { count: 4, units: 9000, recent: [3000], startedAt: start };
+
+  // Nothing calibrated at all -- still says what this chat costs.
+  var cheap = CUBE.estimate(s, null, { burn: 1.2 });
+  assert.strictEqual(cheap.confidence, "counted");
+  assert.strictEqual(cheap.pct, null);
+  assert.strictEqual(cheap.burn, 1.2);
+  assert.strictEqual(cheap.advise, false);
+
+  var dear = CUBE.estimate(s, null, { burn: 4.5 });
+  assert.strictEqual(dear.advise, true, "past the threshold, suggest a fresh chat");
+
+  // Absent on surfaces with no page to measure, and never a bogus value.
+  assert.strictEqual(CUBE.estimate(s, null).burn, null);
+  assert.strictEqual(CUBE.estimate(s, null, { burn: 0 }).burn, null);
+  assert.strictEqual(CUBE.estimate(s, null, { burn: -3 }).burn, null);
+});
+
 test("estimate: survives being handed nothing", function (t){
   var CUBE = load(["session.js", "estimate.js"]).CUBE;
   var e = CUBE.estimate(null, null);

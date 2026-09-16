@@ -94,9 +94,14 @@ var CUBS = (function () {
     var n = normalize(store, now);
     var units = 0;
     for (var i = 0; i < n.stamps.length; i++) units += n.stamps[i].u;
+    // The last few sends' costs, so the readout can say what "at this pace"
+    // means without going near the DOM -- which is what lets the popup and the
+    // service worker say it too.
+    var recent = n.stamps.slice(-3).map(function (e){ return e.u; });
     return {
       count: n.stamps.length,
       units: units,
+      recent: recent,
       startedAt: n.windowStart,
       resetAt: n.windowStart != null ? new Date(n.windowStart + WINDOW_MS).toISOString() : null,
       // True when the anchor came from Claude rather than from the first message

@@ -63,7 +63,13 @@
   // The free readout: what session.js counted, read against whatever Claude's own
   // interface has said about the limit (estimate.js). `pct` is null until
   // something has calibrated it, and that null is what keeps the bar a count.
-  function freeNow(){ return CUBE.estimate(CUBS.summarize(freeStore), calibStore); }
+  function freeNow(){
+    // burnNow() reads the conversation on screen, which only the content script
+    // can do -- so it is measured here and handed in, and is simply absent on the
+    // surfaces that have no page to measure.
+    return CUBE.estimate(CUBS.summarize(freeStore), calibStore,
+                         { burn: isFree() ? CUBE.burnNow() : null });
+  }
   function plural(n, word){ return n + " " + word + (n === 1 ? "" : "s"); }
 
   var FREE_NOTE = "Free plan \u00b7 counted locally";
@@ -98,9 +104,22 @@
     } else {
       t += f.count ? plural(f.count, "message") + " counted in this window" : "no messages counted yet";
     }
+    if (f.sendsLeft != null && !f.exact){
+      t += " \u00b7 about " + plural(f.sendsLeft, "message") + " left at this pace";
+    }
     var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
     if (left) t += ", resets in " + left + (CUB.fmtResetAt(f.resetAt) ? " (" + CUB.fmtResetAt(f.resetAt) + ")" : "");
-    return t + "\n" + whyOf(f);
+    return t + burnLine(f) + "\n" + whyOf(f);
+  }
+
+  // What this conversation costs, and the one thing that can be done about it.
+  // Shown whatever the readout is, because it needs no cap: on a free account
+  // with nothing calibrated yet, this is the only useful thing on the tooltip.
+  function burnLine(f){
+    if (f.burn == null || f.burn < 1.5) return "";
+    var x = f.burn >= 10 ? Math.round(f.burn) : Math.round(f.burn * 10) / 10;
+    return "\nThis chat costs about " + x + "\u00d7 a message in a fresh one" +
+           (f.advise ? ". Starting a new chat would make the next message cheaper." : ".");
   }
 
   // Which of the readouts this is, in words. The hatching says "not a fetched

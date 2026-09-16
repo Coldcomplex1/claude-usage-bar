@@ -80,6 +80,9 @@ function freeHtml(f){
         ? '<div class="p-track"><div class="p-fill est '+colorClass(pct)+'" style="width:'+pct+'%"></div></div>'
         : '')+
       (left ? '<div class="p-reset">resets in '+esc(left)+(at ? ' \u00b7 '+esc(at) : '')+'</div>' : '')+
+      (f.sendsLeft != null && !f.exact
+        ? '<div class="p-reset">about '+esc(plural(f.sendsLeft, "message"))+' left at this pace</div>'
+        : '')+
     '</div>'+
     '<div class="p-note">'+esc(note)+'</div>';
 }
