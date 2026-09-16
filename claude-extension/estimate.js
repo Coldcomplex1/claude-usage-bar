@@ -13,14 +13,21 @@
 // always says how much it actually knows:
 //
 //   counted    nothing has calibrated us; show the count, as before
-//   observed   Claude stated a figure for this window; show a real percentage
+//   observed   Claude stated a figure for THIS window; show a real percentage
+//   estimated  Claude stated a figure in an earlier window; measure this one
+//              against the median of those, hatched and prefixed "~"
 //
-// (estimated -- a modelled percentage -- arrives with the cost model.)
+// What is being measured is not really messages. Claude's limit is spent in
+// tokens, and the whole transcript is re-sent every turn, so message 20 of a
+// long conversation costs many times message 1 of a fresh one. costOf() weighs
+// each send by how much conversation it carried, which is what makes "I only
+// sent 8 messages and got cut off" add up.
 //
-// Two rules hold everywhere below. A notice inside the conversation is the
+// Three rules hold everywhere below. A notice inside the conversation is the
 // user's words or Claude's reply, never a limit notice, and is thrown away
-// before it can be read as one. And anything unparseable degrades to `counted`,
-// never to a wrong number.
+// before it can be read as one. A cap we cannot stand behind is not a
+// denominator, and no bar is drawn against one. And anything unparseable
+// degrades to `counted`, never to a wrong number.
 //
 // Loaded by the content script (which scrapes) and imported by the service
 // worker (which only reads). Everything under "Reading the page" is DOM-only.
@@ -30,6 +37,7 @@ var CUBE = (function () {
   var INSTALL_KEY = "cub_installed_at";
   var WINDOW_MS = 5 * 60 * 60 * 1000;
   var MAX_CAPS = 12;          // how many past windows we keep a cap from
+  var CAP_TTL_MS = 30 * 24 * 60 * 60 * 1000;  // past this a learned cap is history, not evidence
   var MAX_TEXT = 400;         // a limit notice is a sentence, not a transcript
 
   // ===================================================================
@@ -155,13 +163,64 @@ var CUBE = (function () {
     // session.js records as a gap. Either way our count is a floor.
     var whole = !!startedAt && typeof installedAt === "number" && startedAt >= installedAt &&
                 !summary.gap;
-    return { at: Date.now(), cap: cap, count: count, units: summary.units || 0,
+    // The same cap expressed in cost units, which is what the limit is really
+    // spent in. A hard stop measures it exactly -- the units in the window at the
+    // moment Claude cut us off ARE the cap. Anything else has to assume the
+    // messages we have not sent yet cost like the ones we have, which is a much
+    // weaker claim and is why usableCaps() prefers hard stops when it has them.
+    var units = summary.units || 0;
+    var unitsCap = obs.kind === "exhausted" ? units
+                 : (count > 0 && units > 0) ? Math.round(units * cap / count)
+                 : 0;
+    return { at: Date.now(), cap: cap, count: count, units: units,
+             unitsCap: unitsCap || 0,
              used: obs.kind === "usedOf" ? obs.used : null,
              // A cap Claude stated outright holds whether or not we saw the whole
              // window. One we derived from our own count does not.
              stated: obs.kind === "usedOf",
              kind: obs.kind, whole: whole, startedAt: startedAt || null };
   }
+
+  // ===================================================================
+  // What a send costs (pure)
+  // ===================================================================
+  //
+  // Claude's free limit is spent in tokens, not messages. The whole transcript
+  // is re-sent every turn, so message 20 of a long conversation costs many times
+  // message 1 of a fresh one -- which is why "I only sent 8 messages and got cut
+  // off" is a real experience that a message counter can never explain.
+  //
+  // We cannot see tokens. We can see how much text is on the page, and characters
+  // over CHARS_PER_TOKEN is close enough to make a long chat count like a long
+  // chat. That relative truth is the point; the absolute number means nothing
+  // until an observed cap gives it a scale.
+  //
+  // Every constant here is a shape, not a measurement. They are named PRIOR_ for
+  // that reason, and they are why the readout they feed is always marked as an
+  // estimate.
+  var PRIOR_CHARS_PER_TOKEN = 3.9;   // English prose; code is denser, so this over-counts code
+  var PRIOR_OUTPUT_WEIGHT = 5;       // output costs materially more than input
+  var PRIOR_TURN_TOKENS = 2000;      // system prompt and tooling, which we cannot see
+  var PRIOR_IMAGE_TOKENS = 1500;     // a typical image; we see the element, never its size
+
+  function tok(chars){ return Math.max(0, chars || 0) / PRIOR_CHARS_PER_TOKEN; }
+
+  // m: { ctxChars, replyChars, images }
+  //   ctxChars    the whole transcript as it stood when this send was made --
+  //               this is the term that makes turn 20 expensive
+  //   replyChars  the reply to the PREVIOUS send, which has settled by now
+  //   images      images in the conversation we had not already accounted for
+  function costOf(m){
+    m = m || {};
+    var input = tok(m.ctxChars) + PRIOR_TURN_TOKENS + PRIOR_IMAGE_TOKENS * (m.images || 0);
+    var output = PRIOR_OUTPUT_WEIGHT * tok(m.replyChars);
+    var u = Math.round(input + output);
+    return isFinite(u) && u > 0 ? u : 0;
+  }
+
+  // What a short message in a fresh chat costs, so burn rate has something to be
+  // a multiple OF.
+  function baseCost(){ return costOf({ ctxChars: 200, replyChars: 900, images: 0 }); }
 
   function median(xs){
     var v = xs.filter(function (x){ return typeof x === "number" && isFinite(x) && x > 0; })
@@ -208,10 +267,17 @@ var CUBE = (function () {
     // (session.js decide()), so it stays approximate and says so.
     var out = { confidence: "counted", pct: null, count: s.count || 0, units: s.units || 0,
                 cap: null, resetAt: s.resetAt || null, anchored: !!s.anchored,
-                left: null, exact: false };
+                left: null, exact: false,
+                // "units" or "count" on an estimate, saying what it was measured
+                // against; null when nothing was measured.
+                basis: null,
+                // This window has already run past every cap we have learned, so
+                // the cap moved and there is nothing honest to draw. Worth saying
+                // in words even though there is no bar.
+                pastLearned: false };
 
     var obs = currentObs(calib, s);
-    if (!obs) return out;
+    if (!obs) return learned(out, s, calib);
 
     if (obs.kind === "exhausted"){
       // Claude stopped us. Whatever our own count says, this window is spent --
@@ -235,7 +301,7 @@ var CUBE = (function () {
     // contradiction, it just means we no longer know the total -- and saying
     // "0 left" to someone still happily chatting is worse than saying nothing.
     // Fall back to the count until Claude says something else.
-    if (since > thenLeft) return out;
+    if (since > thenLeft) return learned(out, s, calib);
     out.left = left;
 
     // Whether that figure can also be drawn as a bar is a different question.
@@ -259,6 +325,71 @@ var CUBE = (function () {
     out.cap = obs.cap;
     out.pct = clamp(100 * (obs.cap - left) / obs.cap);
     return out;
+  }
+
+  // Claude has said nothing in this window, but it has said things in previous
+  // ones. That is not fact about today -- the free cap moves with demand -- so it
+  // is a weaker reading than an observation and is labelled `estimated`: hatched,
+  // prefixed "~", and drawn against the median of what we have actually seen
+  // rather than against any number shipped in this file.
+  //
+  // Preferred basis is units, because that is what the limit is really spent in:
+  // a window of twenty long messages is not the same as twenty short ones, and
+  // only the unit figure knows the difference. Counts are the fallback for caps
+  // learned before there was a cost model.
+  function learned(out, s, calib){
+    var rows = usableCaps(calib);
+    if (!rows.length) return out;
+
+    var capU = median(rows.map(function (r){ return r.unitsCap; }));
+    var capN = median(rows.map(function (r){ return r.cap; }));
+
+    // An un-hit cap is a lower bound, not a cap. If this window has already gone
+    // past what previous ones allowed and Claude has not stopped us, the limit
+    // moved -- it does, with demand -- and the number we learned is simply too
+    // small. Drawing it would pin the bar at 100% for someone still happily
+    // chatting, which is the same cry-wolf failure as deriving a cap from an
+    // incomplete count. So we say what we know instead: the count, and that this
+    // window has run longer than the ones we have seen.
+    var over = (capU && s.units > 0) ? s.units > capU
+             : (capN ? (s.count || 0) > capN : false);
+    if (over){ out.pastLearned = true; return out; }
+
+    if (capU && s.units > 0){
+      out.confidence = "estimated";
+      out.cap = Math.round(capN || 0) || null;
+      out.pct = clamp(100 * s.units / capU);
+      out.basis = "units";
+      return out;
+    }
+    if (capN){
+      out.confidence = "estimated";
+      out.cap = Math.round(capN);
+      out.pct = clamp(100 * (s.count || 0) / capN);
+      out.basis = "count";
+      return out;
+    }
+    return out;
+  }
+
+  // Only caps we can stand behind: from a window we watched all of (or that
+  // Claude stated outright), and recent enough that the free tier has probably
+  // not moved under them. A cap from last month is not evidence about today.
+  function usableCaps(calib){
+    if (!calib || !Array.isArray(calib.caps)) return [];
+    var cut = Date.now() - CAP_TTL_MS;
+    var out = [];
+    for (var i = 0; i < calib.caps.length; i++){
+      var c = calib.caps[i];
+      if (!c || typeof c.at !== "number" || c.at < cut) continue;
+      if (!c.whole && !c.stated) continue;
+      if (!(c.cap > 0)) continue;
+      out.push(c);
+    }
+    // A hard stop measures the cap exactly; everything else extrapolates from it.
+    // If we have any of the former, the latter is not worth averaging in.
+    var hard = out.filter(function (c){ return c.kind === "exhausted"; });
+    return hard.length ? hard : out;
   }
 
   function clamp(p){
@@ -351,6 +482,68 @@ var CUBE = (function () {
   var lastSeen = "";      // the last notice acted on, so one banner is read once
   var capturing = false;  // cub_debug_on: log limit-ish text we did not match
 
+  // ---- Measuring the conversation ------------------------------------------
+  //
+  // PRIVACY, stated where the code is rather than only in the policy: the two
+  // functions below take the LENGTH of what is on the page and nothing else. The
+  // string is measured and dropped inside a single expression, no part of it is
+  // kept, compared, hashed or sent, and the only thing that reaches storage is an
+  // integer count of characters. Nothing here can reconstruct a word of what was
+  // said -- but it is still reading the page, which is why the README and the
+  // privacy policy say so in as many words.
+  var costKey = "";       // the conversation these totals belong to
+  var costTotal = 0;      // its length when we last looked
+
+  function totalChars(){
+    var root = transcriptRoot();
+    // .length on the spot: the string is never bound to a name that outlives it.
+    return root && root.textContent ? root.textContent.length : 0;
+  }
+
+  function imagesIn(){
+    var root = transcriptRoot();
+    if (!root || !root.querySelectorAll) return 0;
+    return root.querySelectorAll("img").length;
+  }
+
+  // Called by session.js the moment a send is counted, so it sees the transcript
+  // with the new message in it but before any reply has streamed.
+  //
+  // One measurement yields both halves of the cost. The transcript as it now
+  // stands is what this send re-sends, and everything it grew by since the last
+  // send -- minus this message itself -- is the reply to the previous one. So a
+  // single read per send covers input and output both, with no timer and no
+  // second observer.
+  function costOfSend(bubbles){
+    var key = (typeof location !== "undefined") ? location.pathname : "";
+    var total = totalChars();
+    var fresh = costKey !== key;
+    var grew = fresh ? 0 : Math.max(0, total - costTotal);
+    var last = bubbles && bubbles.length ? bubbles[bubbles.length - 1] : null;
+    var sendChars = (last && last.textContent) ? last.textContent.length : 0;
+    // Switching conversations grows the transcript by a whole history that was
+    // never sent by us, so nothing is attributed on the first look at one.
+    var replyChars = fresh ? 0 : Math.max(0, grew - sendChars);
+    costKey = key; costTotal = total;
+    return costOf({ ctxChars: total, replyChars: replyChars, images: imagesIn() });
+  }
+
+  // The last reply of a window has no send after it to be measured by, and it is
+  // often the longest. The existing 30-second heartbeat catches up: whatever the
+  // transcript grew by since we last looked is that reply, and it is added to the
+  // send that asked for it.
+  function costIdle(){
+    var key = (typeof location !== "undefined") ? location.pathname : "";
+    if (costKey !== key) return 0;
+    var total = totalChars();
+    var grew = total - costTotal;
+    if (grew <= 0) return 0;
+    costTotal = total;
+    var u = Math.round(PRIOR_OUTPUT_WEIGHT * tok(grew));
+    if (u > 0) CUBS.addUnits(u);
+    return u;
+  }
+
   // Test one element. Cheap by construction: a limit notice is a short sentence,
   // so anything with more text than that is not one and is never measured
   // further. Called from session.js's observer, so there is no second observer
@@ -423,6 +616,9 @@ var CUBE = (function () {
   return { CALIB_KEY: CALIB_KEY, INSTALL_KEY: INSTALL_KEY, WINDOW_MS: WINDOW_MS,
            clockToIso: clockToIso, parseLimitText: parseLimitText,
            capFrom: capFrom, median: median, currentObs: currentObs, estimate: estimate,
+           costOf: costOf, baseCost: baseCost, usableCaps: usableCaps,
+           costOfSend: costOfSend, costIdle: costIdle,
+           CAP_TTL_MS: CAP_TTL_MS,
            readCalib: readCalib, recordCap: recordCap, clearCalib: clearCalib,
            installedAt: installedAt,
            scanNode: scanNode, sweep: sweep, start: start, stop: stop };

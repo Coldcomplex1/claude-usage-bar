@@ -182,6 +182,25 @@ var CUBS = (function () {
     });
   }
 
+  // Add cost to the most recent send. A reply keeps streaming long after the
+  // send that asked for it was counted, and its length is most of what that turn
+  // actually cost, so the figure has to be allowed to grow after the fact.
+  // No-ops when there is nothing to attribute it to.
+  function addUnits(u, cb){
+    if (typeof u !== "number" || !isFinite(u) || u <= 0){ if (cb) cb(); return; }
+    chrome.storage.local.get([KEY], function (o){
+      var now = Date.now();
+      var cur = normalize(o[KEY], now);
+      if (!cur.stamps.length){ if (cb) cb(); return; }
+      var stamps = cur.stamps.slice();
+      stamps[stamps.length - 1] = { t: stamps[stamps.length - 1].t,
+                                    u: stamps[stamps.length - 1].u + u };
+      var next = Object.assign({}, o[KEY] || {},
+        { stamps: stamps, windowStart: cur.windowStart, updatedAt: now });
+      chrome.storage.local.set({ [KEY]: next }, function (){ if (cb) cb(summarize(next, now)); });
+    });
+  }
+
   function reset(cb){ chrome.storage.local.remove([KEY], function (){ if (cb) cb(); }); }
 
   // ===================================================================
@@ -314,6 +333,6 @@ var CUBS = (function () {
   return { KEY: KEY, WINDOW_MS: WINDOW_MS, GAP_MS: GAP_MS,
            prune: prune, normalize: normalize, summarize: summarize,
            read: read, record: record, setWindowStart: setWindowStart, reset: reset,
-           heartbeat: heartbeat,
+           heartbeat: heartbeat, addUnits: addUnits,
            bubbles: bubbles, decide: decide, watch: watch, unwatch: unwatch };
 })();

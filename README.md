@@ -32,8 +32,10 @@ You can pick which bars show, turn the bar on or off with a keyboard shortcut, a
 open a small popup for the same numbers with a one-click refresh.
 
 Your privacy is respected. The extension only talks to claude.ai and keeps your
-numbers in your local browser storage. It never reads your conversations and never
-sends your data anywhere.
+numbers in your local browser storage, and never sends your data anywhere. On the
+free plan it measures how long your messages are, because that is what the limit
+is really spent on — only the character count is kept, never a word of what you
+wrote, and it never leaves your device.
 
 This extension is not affiliated with, endorsed by, or sponsored by Anthropic. Claude
 is a trademark of Anthropic PBC. It relies on undocumented Claude features that can
@@ -76,7 +78,8 @@ that day -- a request that failed is not an answer, so an outage or a logged-out
 moment never parks a paying account on the free readout.
 
 In between, `session.js` counts sends, by watching the transcript for a new message
-bubble; it stores a timestamp per message. Message text is never read or stored. A
+bubble; it stores a timestamp per message, and a cost in units (below). Message
+text is measured for its length and never stored. A
 batch that adds several bubbles at once is history arriving (a page load, a
 conversation switch, scrolling back) and is not counted; only a single bubble
 appearing at the end of the transcript is.
@@ -99,7 +102,25 @@ there is no second observer on the page. From those it learns two things:
 - **A stated figure gives a denominator.** "5 left" when we have counted 20 means
   the cap is 25; being cut off at 23 means the cap was 23, exactly.
 
-Three rules keep that honest:
+A figure Claude gave in an earlier window is not a fact about this one, but it is
+the best evidence there is, so a window Claude has said nothing about is measured
+against the median of what it said before. That reading is `estimated` rather than
+`observed`, and the tooltip says which it is.
+
+**Messages are not what the limit is spent on.** Claude is billed in tokens, and
+the whole conversation is re-sent every turn, so message 20 of a long chat costs
+many times message 1 of a fresh one — which is why "I only sent 8 messages and got
+cut off" is a real experience a message counter can never explain. So each send is
+weighed by how much conversation it carried: character counts over a
+characters-per-token figure, with output weighted above input and a flat allowance
+for the system prompt and for images. Every constant is named `PRIOR_` because it
+is a shape rather than a measurement; they make the *relative* comparison
+trustworthy long before they make any absolute number so. Only the integer cost is
+stored, never the text it was measured from. If the page changes shape and the
+measurement stops working, every send costs the same flat amount and the estimate
+degrades to the count-based one rather than reading as no usage at all.
+
+Four rules keep that honest:
 
 - **A number inside the conversation is never read as a limit.** Anything the
   guard places inside the transcript or the composer is thrown out before the
@@ -111,6 +132,11 @@ Three rules keep that honest:
   our count is a floor — the cap comes out too small and the percentage too big,
   which would tell someone they are nearly out when they are not. So no bar is
   drawn at all. The row shows "5 left" instead, which is the more useful half.
+- **An un-hit cap is a lower bound, not a cap.** If a window has already run past
+  every limit learned before and Claude has not stopped you, the cap moved — it
+  does, with demand — and the learned number is simply too small. Pinning the bar
+  at 100% for someone still happily chatting is the same cry-wolf failure as
+  above, so no bar is drawn and the row says "past your usual".
 - **Nothing degrades to a wrong number.** Every path can only turn a count into a
   percentage. If Claude rewords its notices and none of the patterns match again,
   the readout is the count it always was.
@@ -247,9 +273,15 @@ On the free plan the readout is only ever as good as what Claude has said:
   in `estimate.js` stop matching and the bar falls back to the message count. It
   degrades to less information, never to a wrong number.
 - **The free cap moves with demand,** so a figure Claude gave in one window is not
-  a promise about the next. Only a figure stated during the window in progress is
-  used as a denominator; older ones are history. This is why the bar is hatched
-  and prefixed `~`.
+  a promise about the next. A figure stated during the window in progress is used
+  directly; older ones are used only as a median, are dropped after 30 days, and
+  give the weaker `estimated` reading. This is why the bar is hatched and prefixed
+  `~`.
+- **The cost model approximates tokens from characters.** It is systematically off
+  for code, which is denser than prose, and it is blind to how large an image or
+  an uploaded file actually is — an upload can cost more than everything else in
+  the window and the extension cannot see it. The burn-rate comparison it supports
+  is trustworthy well before the absolute percentage is.
 - **The count is per browser profile.** Messages sent from the phone app, or from
   another browser, are invisible to it, which makes it a floor rather than a
   total. A figure from Claude is the only thing that corrects for this, because it

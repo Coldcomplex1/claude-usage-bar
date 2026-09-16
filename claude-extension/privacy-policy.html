@@ -56,6 +56,29 @@
   the transcript, so typing “5 messages left” into a chat cannot change what the
   bar shows.</p>
 
+  <h2>Measuring how long your messages are</h2>
+  <p>Claude’s free limit is not really spent in messages, it is spent in tokens.
+  The whole conversation is re-sent to Claude every turn, so a message late in a
+  long conversation uses far more of your limit than the first message in a fresh
+  one. To reflect that, the extension measures <strong>how long</strong> the
+  conversation on screen is — a character count — and weights each message by it.</p>
+  <p>This means the extension does look at the text of the page in order to take
+  its length. To be exact about what that involves:</p>
+  <ul>
+    <li>Only the <strong>number of characters</strong> is kept. The text itself is
+      measured and discarded in the same step.</li>
+    <li>No word, phrase, fragment, summary, or hash of your conversation is ever
+      stored, and none is ever sent anywhere. There is no server to send it to.</li>
+    <li>What reaches storage is a whole number per message, alongside its
+      timestamp, and it is discarded with the rest when the 5-hour window ends.</li>
+    <li>This runs only on accounts where Claude reports no usage. On a paid plan
+      it never starts.</li>
+  </ul>
+  <p>Earlier versions of this policy said the extension never reads your
+  conversations. Taking a length is reading, in the literal sense, so that wording
+  has been replaced with the more precise statement above rather than left to
+  quietly stop being true.</p>
+
   <h2>How the data is used and stored</h2>
   <p>This data is used only to render the usage bar and the extension’s popup. It is
   stored locally on your own device using the browser’s <code>storage.local</code>
@@ -70,9 +93,10 @@
     <li>We do not sell or transfer your data to anyone.</li>
     <li>We do not use your data for advertising, profiling, creditworthiness, or
       any purpose unrelated to showing your usage.</li>
-    <li>We do not read, store, or transmit the content of your conversations. On
-      the free plan we count how many messages you have sent, as described above,
-      and never what they contain.</li>
+    <li>We do not store or transmit the content of your conversations, ever. On
+      the free plan we count how many messages you have sent and measure how many
+      characters long they are, as described above — never what they say, and
+      nothing that could reconstruct it.</li>
   </ul>
 
   <h2>Permissions</h2>

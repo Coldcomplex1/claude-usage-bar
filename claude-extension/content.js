@@ -72,8 +72,15 @@
                  "messages you send in the 5-hour window. Counting starts when the " +
                  "extension is installed, so the first window can read low.";
   var FREE_WHY_OBS = "Claude publishes no usage percentage on the free plan. This is worked " +
-                     "out from what Claude itself told you about your limit, so it is close " +
-                     "but not official \u2014 and the free cap moves with demand.";
+                     "out from what Claude itself told you about your limit in this window, " +
+                     "so it is close but not official.";
+  var FREE_WHY_EST = "Claude has said nothing about your limit in this window, so this measures " +
+                     "it against what Claude told you in earlier ones. The free cap moves with " +
+                     "demand, so treat it as a guide rather than a number. Longer conversations " +
+                     "count for more, because they cost more.";
+  var FREE_PAST = "This window has already run past every limit seen before, and Claude has not " +
+                  "stopped you \u2014 so the cap has moved and there is nothing honest to draw " +
+                  "against. This is the count.";
   var FREE_WHY_LEFT = "Claude told you how many messages are left, which says nothing about " +
                       "the total \u2014 and this browser did not see the whole window, so there " +
                       "is no honest percentage to draw. The count left is the useful half.";
@@ -93,7 +100,16 @@
     }
     var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
     if (left) t += ", resets in " + left + (CUB.fmtResetAt(f.resetAt) ? " (" + CUB.fmtResetAt(f.resetAt) + ")" : "");
-    return t + "\n" + (f.pct != null ? FREE_WHY_OBS : f.left != null ? FREE_WHY_LEFT : FREE_WHY);
+    return t + "\n" + whyOf(f);
+  }
+
+  // Which of the readouts this is, in words. The hatching says "not a fetched
+  // number"; only this says where the number actually came from.
+  function whyOf(f){
+    if (f.pct != null) return f.confidence === "estimated" ? FREE_WHY_EST : FREE_WHY_OBS;
+    if (f.left != null) return FREE_WHY_LEFT;
+    if (f.pastLearned) return FREE_PAST;
+    return FREE_WHY;
   }
 
   function freeAria(){
@@ -107,7 +123,9 @@
       head = "Session: about " + Math.round(f.pct) + " percent used" +
              (f.left != null ? ", about " + plural(f.left, "message") + " left" : "");
       // A screen reader has no hatching to go on, so the word has to be said.
-      why = ". Estimated from what Claude told you.";
+      why = f.confidence === "estimated"
+        ? ". Estimated against your earlier windows."
+        : ". Estimated from what Claude told you.";
     } else if (f.left != null){
       head = "Session: " + plural(f.left, "message") + " left";
       why = ". Claude's own figure. No percentage available.";
@@ -292,7 +310,8 @@
       val.textContent = f.left + " left";
     } else {
       track.hidden = true;
-      note.hidden = false; note.textContent = FREE_NOTE;
+      note.hidden = false;
+      note.textContent = f.pastLearned ? "Free plan \u00b7 past your usual" : FREE_NOTE;
       val.textContent = f.count + " msg";
     }
     node.querySelector(".cub-reset").textContent = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
@@ -730,7 +749,7 @@
       // estimate.js reads Claude's own limit notices off the nodes this observer
       // is already walking, rather than putting a second observer on a page that
       // is busy enough with one.
-      CUBS.watch(null, { onNodes: CUBE.scanNode });
+      CUBS.watch(null, { onNodes: CUBE.scanNode, cost: CUBE.costOfSend });
       CUBE.sweep();   // a notice can already be on screen (a reload after a limit)
     } else {
       CUBS.unwatch(); CUBE.stop();
@@ -950,7 +969,9 @@
     // the heartbeat that was already repainting the countdown also takes one
     // bounded look for one. Free accounts only: on a paid one there is nothing
     // to find and nothing is scanned.
-    if (enabled && isFree()){ CUBE.sweep(); CUBS.heartbeat(); }
+    // costIdle() is what catches the reply to the last send of a window: it has
+    // no send after it to be measured by, and it is often the longest.
+    if (enabled && isFree()){ CUBE.sweep(); CUBE.costIdle(); CUBS.heartbeat(); }
     refresh(POLL_MS - 5000);
   }
 

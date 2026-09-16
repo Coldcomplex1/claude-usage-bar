@@ -480,6 +480,139 @@ test("estimate: a figure overtaken by events is dropped, not shown as 0 left", f
   assert.strictEqual(e.count, 40);
 });
 
+// ===================================================================
+// estimate.js -- the cost model
+// ===================================================================
+
+test("costOf: a long conversation costs more per send than a fresh one", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+
+  var fresh = CUBE.costOf({ ctxChars: 200, replyChars: 900, images: 0 });
+  var deep  = CUBE.costOf({ ctxChars: 60000, replyChars: 900, images: 0 });
+  assert.ok(deep > fresh * 3,
+    "message 20 of a long chat should cost several times message 1 (" + fresh + " vs " + deep + ")");
+
+  // Monotonic in context, which is the property the whole model rests on.
+  var prev = 0;
+  [0, 1000, 5000, 20000, 80000].forEach(function (c){
+    var u = CUBE.costOf({ ctxChars: c, replyChars: 500 });
+    assert.ok(u >= prev, "cost must not fall as context grows");
+    prev = u;
+  });
+
+  // Output is weighted above input, per token.
+  var inHeavy  = CUBE.costOf({ ctxChars: 10000, replyChars: 0 });
+  var outHeavy = CUBE.costOf({ ctxChars: 0, replyChars: 10000 });
+  assert.ok(outHeavy > inHeavy, "output should weigh more than the same input");
+
+  // An image costs something we cannot otherwise see.
+  assert.ok(CUBE.costOf({ ctxChars: 500, images: 1 }) > CUBE.costOf({ ctxChars: 500, images: 0 }));
+
+  // Junk in, a finite number out -- never NaN into the stored units.
+  [null, undefined, {}, { ctxChars: NaN, replyChars: "x" }, { ctxChars: -5 }].forEach(function (m){
+    var u = CUBE.costOf(m);
+    assert.ok(typeof u === "number" && isFinite(u) && u >= 0, "finite and non-negative for " + JSON.stringify(m));
+  });
+
+  // With nothing measurable, every send still costs the same flat overhead. That
+  // is the graceful degradation: if the page changes shape and the measurement
+  // stops working, units become proportional to the message count and the
+  // estimate quietly becomes the count-based one, rather than collapsing to zero
+  // and reading as "no usage at all".
+  assert.strictEqual(CUBE.costOf(null), CUBE.costOf({ ctxChars: 0, replyChars: 0 }));
+  assert.ok(CUBE.costOf(null) > 0);
+});
+
+test("usableCaps: only recent caps we can stand behind, hard stops preferred", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var now = Date.now();
+  var rows = CUBE.usableCaps({ caps: [
+    { at: now - 60 * 24 * HOUR, cap: 30, whole: true,  kind: "remaining" },  // too old
+    { at: now - HOUR,           cap: 20, whole: false, kind: "remaining" },  // incomplete count
+    { at: now - 2 * HOUR,       cap: 25, whole: true,  kind: "remaining" },  // usable
+    { at: now - 3 * HOUR,       cap: 23, whole: true,  kind: "exhausted" }   // exact
+  ] });
+  assert.strictEqual(rows.length, 1, "a hard stop outranks everything softer");
+  assert.strictEqual(rows[0].cap, 23);
+
+  // With no hard stop, the soft-but-complete ones are used.
+  var soft = CUBE.usableCaps({ caps: [
+    { at: now - HOUR,     cap: 20, whole: false, kind: "remaining" },
+    { at: now - 2 * HOUR, cap: 25, whole: true,  kind: "remaining" },
+    { at: now - 3 * HOUR, cap: 27, whole: true,  kind: "remaining" }
+  ] });
+  assert.strictEqual(soft.length, 2);
+  assert.strictEqual(CUBE.usableCaps(null).length, 0);
+});
+
+test("estimate: past windows give an estimate, measured in units when we have them", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var now = Date.now(), start = now - HOUR;
+  // Two previous windows ended at ~30000 units. This one is at 15000.
+  var calib = { caps: [
+    { at: now - 8 * HOUR, cap: 20, unitsCap: 28000, whole: true, kind: "exhausted" },
+    { at: now - 30 * HOUR, cap: 22, unitsCap: 32000, whole: true, kind: "exhausted" }
+  ] };
+  var e = CUBE.estimate({ count: 9, units: 15000, startedAt: start }, calib);
+  assert.strictEqual(e.confidence, "estimated");
+  assert.strictEqual(e.basis, "units");
+  assert.strictEqual(e.pct, 50);
+
+  // Same window, but the sends were cheap: fewer units, so a lower reading than
+  // the raw count would give. This is the whole point of weighting.
+  var cheap = CUBE.estimate({ count: 9, units: 6000, startedAt: start }, calib);
+  assert.ok(cheap.pct < e.pct, "cheap sends should read lower than expensive ones");
+});
+
+test("estimate: with no units recorded it falls back to counting", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var now = Date.now(), start = now - HOUR;
+  var calib = { caps: [{ at: now - 8 * HOUR, cap: 20, unitsCap: 0, whole: true, kind: "exhausted" }] };
+  var e = CUBE.estimate({ count: 10, units: 0, startedAt: start }, calib);
+  assert.strictEqual(e.confidence, "estimated");
+  assert.strictEqual(e.basis, "count");
+  assert.strictEqual(e.pct, 50);
+});
+
+test("estimate: a window past every learned cap draws no bar", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var now = Date.now(), start = now - HOUR;
+  // Previous windows ended at 20 messages. This one is at 45 and Claude has not
+  // stopped us, so the cap moved -- it does, with demand. Pinning the bar at
+  // 100% for someone still chatting is the same cry-wolf failure as deriving a
+  // cap from an incomplete count, so we say what we know: the count.
+  var calib = { caps: [{ at: now - 8 * HOUR, cap: 20, unitsCap: 0, whole: true, kind: "exhausted" }] };
+  var e = CUBE.estimate({ count: 45, units: 0, startedAt: start }, calib);
+  assert.strictEqual(e.confidence, "counted");
+  assert.strictEqual(e.pct, null);
+  assert.strictEqual(e.pastLearned, true, "but it is worth saying in words");
+});
+
+test("estimate: a stale cap is not evidence about today", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var now = Date.now(), start = now - HOUR;
+  var calib = { caps: [{ at: now - 60 * 24 * HOUR, cap: 20, unitsCap: 28000,
+                         whole: true, kind: "exhausted" }] };
+  var e = CUBE.estimate({ count: 5, units: 9000, startedAt: start }, calib);
+  assert.strictEqual(e.confidence, "counted", "past the TTL it is history, not a denominator");
+});
+
+test("capFrom: a hard stop measures the cap in units exactly", function (t){
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  var start = Date.now() - HOUR;
+
+  var hard = CUBE.capFrom({ kind: "exhausted", n: 0 },
+                          { count: 20, units: 30000, startedAt: start }, start - 1000);
+  assert.strictEqual(hard.unitsCap, 30000, "the units in the window when Claude cut us off");
+
+  // "5 left" has to assume the sends we have not made cost like the ones we
+  // have, which is why usableCaps prefers hard stops.
+  var soft = CUBE.capFrom({ kind: "remaining", n: 5 },
+                          { count: 20, units: 30000, startedAt: start }, start - 1000);
+  assert.strictEqual(soft.cap, 25);
+  assert.strictEqual(soft.unitsCap, 37500);
+});
+
 test("estimate: survives being handed nothing", function (t){
   var CUBE = load(["session.js", "estimate.js"]).CUBE;
   var e = CUBE.estimate(null, null);

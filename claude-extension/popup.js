@@ -43,9 +43,12 @@ function freeHtml(f){
     aria = "Session: about " + pct + " percent used" +
            (f.left != null ? ", about " + plural(f.left, "message") + " left" : "") +
            ". Estimated from what Claude told you.";
-    note = "Free plan: Claude publishes no percentage, so this is worked out from what " +
-           "Claude itself told you about your limit. The free cap moves with demand, so " +
-           "treat it as close rather than exact.";
+    note = f.confidence === "estimated"
+      ? "Free plan: Claude has said nothing about your limit in this window, so this measures " +
+        "it against what Claude told you in earlier ones. Longer conversations count for more, " +
+        "because they cost more. The free cap moves with demand, so treat it as a guide."
+      : "Free plan: Claude publishes no percentage, so this is worked out from what Claude " +
+        "itself told you about your limit in this window.";
   } else if (f.left != null){
     val = plural(f.left, "message") + " left";
     aria = "Session: " + plural(f.left, "message") + " left, per Claude. No percentage available.";
@@ -56,8 +59,12 @@ function freeHtml(f){
     val = f.count + " msg";
     aria = "Session: " + plural(f.count, "message") + " counted in this 5-hour window" +
            (left ? ", resets in " + left : "");
-    note = "Free plan: Claude reports no usage percentage, so this counts the messages you " +
-           "send in the 5-hour window. Counting starts at install.";
+    note = f.pastLearned
+      ? "Free plan: this window has already run past every limit seen before, and Claude has " +
+        "not stopped you, so the cap has moved. There is nothing honest to draw against, so " +
+        "this is the count."
+      : "Free plan: Claude reports no usage percentage, so this counts the messages you send " +
+        "in the 5-hour window. Counting starts at install.";
   }
 
   return '<div class="p-row" '+

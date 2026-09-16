@@ -112,13 +112,17 @@ function titleFor(data, free){
     } else if (free && free.pct != null){
       head = "\nSession (5h): " + Math.round(free.pct) + "% used" +
              (free.left != null ? " \u00b7 about " + free.left + " left" : "");
-      why = "Claude publishes no percentage on the free plan; this is worked out from what it told you.";
+      why = free.confidence === "estimated"
+        ? "Claude has said nothing this window; measured against what it told you in earlier ones."
+        : "Claude publishes no percentage on the free plan; this is worked out from what it told you.";
     } else if (free && free.left != null){
       head = "\nSession (5h): " + free.left + (free.left === 1 ? " message" : " messages") + " left";
       why = "Claude's own figure. It says nothing about the total, so there is no percentage to show.";
     } else {
       head = "\nSession (5h): " + n + (n === 1 ? " message" : " messages") + " counted";
-      why = "Claude reports no usage percentage on the free plan.";
+      why = (free && free.pastLearned)
+        ? "Past every limit seen before, and Claude has not stopped you: the cap has moved."
+        : "Claude reports no usage percentage on the free plan.";
     }
     return base + head +
       (left ? " \u00b7 resets in " + left : "") + "\n" + why +

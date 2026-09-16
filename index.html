@@ -714,7 +714,8 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
               <button class="chip" data-free="">Paid plan</button>
               <button class="chip" data-free="counted">Free: counted</button>
               <button class="chip" data-free="left">Free: Claude's figure</button>
-              <button class="chip" data-free="estimated">Free: estimated</button>
+              <button class="chip" data-free="estimated">Free: Claude's number</button>
+              <button class="chip" data-free="learned">Free: estimated</button>
               <button class="chip" data-free="blocked">Free: out</button>
             </div>
           </div>
@@ -839,7 +840,7 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
           <p style="margin-top:18px"><a class="btn btn-ghost btn-sm" href="/privacy">Read the privacy policy</a></p>
         </div>
         <ul class="no-list">
-          <li><span class="tick">&#10003;</span><span>It never reads, stores or sends your conversations.</span></li>
+          <li><span class="tick">&#10003;</span><span>It never stores or sends your conversations &mdash; on the free plan it measures how long they are, and keeps only that number.</span></li>
           <li><span class="tick">&#10003;</span><span>It sends nothing to any third party server. There is no analytics and no tracking.</span></li>
           <li><span class="tick">&#10003;</span><span>It never asks for an API key, a token or a password.</span></li>
           <li><span class="tick">&#10003;</span><span>Uninstalling it removes everything it stored.</span></li>
@@ -985,7 +986,8 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
   var FREE = {
     counted:   { pct:null, left:null, count:12, exact:false, note:"Free plan \u00b7 counted locally" },
     left:      { pct:null, left:5,    count:12, exact:false, note:"Free plan \u00b7 Claude's own figure" },
-    estimated: { pct:80,   left:5,    count:20, exact:false, note:"" },
+    estimated: { pct:80,   left:5,    count:20, exact:false, note:"", conf:"observed" },
+    learned:   { pct:64,   left:null, count:14, exact:false, note:"", conf:"estimated" },
     blocked:   { pct:100,  left:0,    count:23, exact:true,  note:"" }
   };
   function freeNow(){ return S.free ? FREE[S.free] : null; }
@@ -1212,7 +1214,8 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
         '<div class="p-reset">resets 2h 41m</div></div>'+
         '<div class="p-note">'+(
           f.exact ? "Claude says you are out of messages for this window."
-          : f.pct != null ? "Claude publishes no percentage on the free plan; this is worked out from what Claude itself told you."
+          : f.conf === "estimated" ? "Claude has said nothing about your limit in this window, so this measures it against what Claude told you in earlier ones. Longer conversations count for more, because they cost more."
+          : f.pct != null ? "Claude publishes no percentage on the free plan; this is worked out from what Claude itself told you in this window."
           : f.left != null ? "Claude told you how many are left, which says nothing about the total, so there is no honest percentage to draw."
           : "Claude reports no usage percentage, so this counts the messages you send in the 5-hour window."
         )+'</div>';
