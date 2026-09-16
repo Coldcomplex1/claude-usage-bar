@@ -683,6 +683,21 @@ test("estimate: burn rate needs no cap, and drives the new-chat advice", functio
   assert.strictEqual(CUBE.estimate(s, null, { burn: -3 }).burn, null);
 });
 
+test("the DOM half is inert without a DOM, rather than throwing", function (t){
+  // estimate.js is importScripts()'d into the service worker, where there is no
+  // document. Nothing there calls these today, but a throw in the worker takes
+  // the badge down with it, so they have to be safe rather than merely unused.
+  // This test runs in Node, so `document` genuinely is not defined.
+  var CUBE = load(["session.js", "estimate.js"]).CUBE;
+  assert.strictEqual(typeof document, "undefined", "the premise of this test");
+
+  assert.strictEqual(CUBE.burnNow(), null);
+  assert.strictEqual(CUBE.costIdle(), 0);
+  assert.strictEqual(CUBE.costOfSend(), 0);
+  assert.strictEqual(CUBE.scanNode({ nodeType: 1, textContent: "5 messages left" }), null);
+  assert.doesNotThrow(function (){ CUBE.sweep(); });
+});
+
 test("estimate: survives being handed nothing", function (t){
   var CUBE = load(["session.js", "estimate.js"]).CUBE;
   var e = CUBE.estimate(null, null);

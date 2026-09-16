@@ -500,12 +500,22 @@ var CUBE = (function () {
   // sentence about limits from being read as a limit.
   var rootCache = null, rootCacheAt = 0;
 
+  // This half of the file is DOM-only, but the whole file is importScripts()'d
+  // into the service worker, where there is no document. Nothing below is called
+  // from there today; this makes sure that if something ever is, it returns
+  // nothing instead of throwing and taking the badge down with it. Every path
+  // into the DOM goes through transcriptRoot(), so one guard covers them all.
+  function hasDom(){
+    return typeof document !== "undefined" && !!document.querySelectorAll;
+  }
+
   // The transcript, found from the message bubbles rather than named outright:
   // claude.ai renames its classes, but a bubble's ancestry still says where the
   // conversation lives. With two or more turns the lowest common ancestor is
   // exactly the transcript; with one there is nothing to intersect, so we walk
   // up a few levels and accept a slightly wider exclusion.
   function transcriptRoot(){
+    if (!hasDom()) return null;
     var now = Date.now();
     if (rootCache !== null && now - rootCacheAt < 1000) return rootCache;
     rootCacheAt = now;
@@ -571,7 +581,8 @@ var CUBE = (function () {
   // single read per send covers input and output both, with no timer and no
   // second observer.
   function costOfSend(bubbles){
-    var key = (typeof location !== "undefined") ? location.pathname : "";
+    if (!hasDom()) return 0;
+    var key = location.pathname;
     var total = totalChars();
     var fresh = costKey !== key;
     var grew = fresh ? 0 : Math.max(0, total - costTotal);
@@ -607,7 +618,8 @@ var CUBE = (function () {
   // transcript grew by since we last looked is that reply, and it is added to the
   // send that asked for it.
   function costIdle(){
-    var key = (typeof location !== "undefined") ? location.pathname : "";
+    if (!hasDom()) return 0;
+    var key = location.pathname;
     if (costKey !== key) return 0;
     var total = totalChars();
     var grew = total - costTotal;
@@ -623,7 +635,7 @@ var CUBE = (function () {
   // further. Called from session.js's observer, so there is no second observer
   // on the page.
   function scanNode(el){
-    if (!el || el.nodeType !== 1) return null;
+    if (!hasDom() || !el || el.nodeType !== 1) return null;
     var txt = el.textContent;
     if (!txt || txt.length > MAX_TEXT) return null;
     txt = txt.trim();
@@ -668,7 +680,7 @@ var CUBE = (function () {
   // bounded pass over the short text blocks on the page covers both; it is
   // called from the existing 30s heartbeat, not on a timer of its own.
   function sweep(){
-    if (typeof document === "undefined") return;
+    if (!hasDom()) return;
     var nodes = document.querySelectorAll("div, p, span, section, aside");
     var checked = 0;
     for (var i = nodes.length - 1; i >= 0 && checked < 400; i--){
