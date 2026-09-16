@@ -66,6 +66,10 @@ function setStatus(t){ document.getElementById("status").textContent = t; }
 // never looks like a fresh one.
 function showAge(){
   if (!shown || !shown.fetchedAt) return setStatus("");
+  // On the free plan the count above is ours and always current; fetchedAt dates
+  // only the once-a-day check for a percentage. "Updated 23h ago" would read as a
+  // stale number, so say what was actually checked.
+  if (shown.reported === false) return setStatus("Checked " + CUB.fmtAgo(shown.fetchedAt));
   setStatus("Updated " + CUB.fmtAgo(shown.fetchedAt));
 }
 
@@ -79,6 +83,9 @@ async function refresh(force){
   // The popup used to fire a request on every open. The numbers move slowly and
   // an open tab (or the background alarm) is already refreshing them, so unless
   // the user asks we only go to the network when what we have has gone off.
+  // Refresh is also the one way past the free plan's day-long hold, so someone
+  // who has just upgraded gets their bars back without waiting the day out.
+  if (!force && CUB.freeHold(shown)) return showAge();
   if (!force && shown && shown.fetchedAt && Date.now() - shown.fetchedAt < FRESH_MS) return showAge();
   setBusy(true);
   setStatus("Updating…");
@@ -100,6 +107,11 @@ async function refresh(force){
 // Paint with the counted free session read alongside, so the popup never has to
 // care which of the two readouts it is about to draw.
 function paint(data){
+  // Set before the free branch's asynchronous read, not only inside render():
+  // showAge() and refresh() both run straight after paint() and read `shown`, and
+  // on the free plan that read used to land a tick too late -- which showed no
+  // "Checked ..." line and sent a request on every popup open.
+  shown = data || null;
   if (data && data.reported === false) CUBS.read(function (f){ render(data, f); });
   else render(data);
 }

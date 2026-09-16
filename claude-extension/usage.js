@@ -17,6 +17,11 @@
 // capabilities) only ever words the message -- the presence of real windows is
 // what decides which readout is shown, so an unfamiliar capability list can
 // never demote a paying account to the free view.
+//
+// That answer is also worth holding on to. "Claude reports no usage for this
+// account" does not change from minute to minute, so every surface stops asking
+// for a day once it has one (freeHold, below) and checks again after that in
+// case the account has been upgraded.
 
 var CUB = (function () {
   var AUTO_KEY = "cub_org";          // {id,name,caps,ts} auto-detected
@@ -24,6 +29,7 @@ var CUB = (function () {
   var DEBUG_KEY = "cub_debug_on";    // opt-in: keep the raw payload in storage
   var FORCE_KEY = "cub_debug_plan";  // test hook: "free" forces the not-reported path
   var ORG_TTL_MS = 6 * 60 * 60 * 1000;
+  var FREE_RECHECK_MS = 24 * 60 * 60 * 1000;  // free plan: check again once a day
   var API = "https://claude.ai/api";
 
   function sget(k){ return new Promise(function(r){ chrome.storage.local.get(k, r); }); }
@@ -133,6 +139,20 @@ var CUB = (function () {
   function maxUtil(s){
     return Math.max.apply(null, [s.session, s.allModels, s.opus]
       .map(function(w){ return w.available ? w.pct : -1; }).concat(-1));
+  }
+
+  // Should this reading be reused instead of going to the network? True only for
+  // a free account inside the day since it was last checked. Every surface calls
+  // this from the freshness gate it already had, so one rule covers the tab poll,
+  // the background alarm, the popup and the Settings page.
+  //
+  // It is armed by a stored result and nothing else, which is what keeps a failed
+  // request from counting as the day's check: a fetch that throws never writes
+  // cub_last, so an outage (or a logged-out moment) leaves the normal retry and
+  // backoff in charge and can never park a paying account on the free readout.
+  function freeHold(last){
+    return !!last && last.reported === false && !!last.fetchedAt &&
+           (Date.now() - last.fetchedAt) < FREE_RECHECK_MS;
   }
 
   // ---- Plan ----------------------------------------------------------------
@@ -305,5 +325,6 @@ var CUB = (function () {
 
   return { getUsage:getUsage, scanOrgs:scanOrgs, setManualOrg:setManualOrg, clearOrg:clearOrg,
            summarize:summarize, planFromCaps:planFromCaps,
+           freeHold:freeHold, FREE_RECHECK_MS:FREE_RECHECK_MS,
            fmtReset:fmtReset, fmtResetAt:fmtResetAt, fmtAgo:fmtAgo };
 })();
