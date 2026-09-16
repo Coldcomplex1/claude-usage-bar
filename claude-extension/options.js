@@ -63,7 +63,10 @@ async function refreshAccount(force){
   if (!force){
     var st = await new Promise(function(r){ chrome.storage.local.get([LAST_KEY], r); });
     var last = st[LAST_KEY];
-    if (last && last.orgName && last.fetchedAt && Date.now() - last.fetchedAt < 60000){
+    // ... or when it is an account Claude reports no usage for, where the name
+    // came from the daily check and opening Settings is no reason to run another.
+    if (last && last.orgName &&
+        (CUB.freeHold(last) || (last.fetchedAt && Date.now() - last.fetchedAt < 60000))){
       setAcct(last.orgName);
       return;
     }

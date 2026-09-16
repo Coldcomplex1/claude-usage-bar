@@ -122,6 +122,11 @@
   var fetchFailed = false;
   function isStale(){
     if (!lastData || !lastData.fetchedAt) return false;
+    // The free readout is counted here, not fetched, so it cannot go off. The
+    // only thing fetchedAt dates on that plan is the once-a-day check for a
+    // percentage, which is hours old by design; dimming the count against it
+    // would call the freshest thing on the page out of date.
+    if (isFree()) return false;
     var age = Date.now() - lastData.fetchedAt;
     return age > STALE_MS || (fetchFailed && age > 2 * 60 * 1000);
   }
@@ -836,6 +841,11 @@
   // out to all of them, so whichever tab asks first now serves the rest.
   async function refresh(maxAge){
     if (!enabled) return;
+    // A free account has nothing to poll for: Claude publishes no percentage, and
+    // the row on screen is a count of our own, kept current by the observer in
+    // session.js rather than by this. So check once a day, in case the account
+    // has been upgraded, instead of once a minute for an answer we already have.
+    if (CUB.freeHold(lastData)) return;
     if (maxAge && lastData && lastData.fetchedAt && Date.now() - lastData.fetchedAt < maxAge) return;
     try { await fetchAndStore(); } catch (e) { fetchFailed = true; markError(); }
   }

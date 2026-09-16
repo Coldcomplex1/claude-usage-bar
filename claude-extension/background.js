@@ -89,7 +89,9 @@ function titleFor(data, free){
     return base + "\nSession (5h): " + n + (n === 1 ? " message" : " messages") + " counted" +
       (left ? " \u00b7 resets in " + left : "") +
       "\nClaude reports no usage percentage on the free plan." +
-      (data.fetchedAt ? "\nUpdated " + CUB.fmtAgo(data.fetchedAt) : "");
+      // Not "Updated": the count above is live, and this timestamp dates only the
+      // once-a-day check for a percentage, which is hours old by design.
+      (data.fetchedAt ? "\nChecked " + CUB.fmtAgo(data.fetchedAt) : "");
   }
   var lines = [];
   [["Session (5h)", data.session], ["All models (7d)", data.allModels], ["Opus (7d)", data.opus]]
@@ -207,6 +209,10 @@ async function doRefresh(reason){
     if (reason === "alarm" && h.nextAttemptAt && Date.now() < h.nextAttemptAt) return;
 
     var last = st[LAST_KEY];
+    // Free plan: one check a day, not one every five minutes. Ahead of the
+    // freshness test on purpose -- a day-old reading is no evidence the session
+    // still works, so it must not clear the backoff below either.
+    if (CUB.freeHold(last)) return;
     if (last && last.fetchedAt && Date.now() - last.fetchedAt < FRESH_MS){
       // A visible tab or the popup just refreshed. Nothing to do, and the fact
       // that it worked means the session is fine, so drop any backoff.

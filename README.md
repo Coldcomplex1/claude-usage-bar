@@ -57,15 +57,24 @@ whether that second call actually returned any windows, never by the plan name â
 so an account Claude reports usage for always gets the bars, whatever its
 capabilities happen to be called.
 
-On an account with no windows (the free plan) nothing is fetched to fill them.
-`session.js` counts sends instead, by watching the transcript for a new message
+On an account with no windows (the free plan) there is nothing to fill them with,
+so that answer is held for a day rather than asked for again every minute. It is
+still checked: once the day is up the next refresh probes for real, so an upgrade
+is picked up on its own, and the popup's Refresh button forces a check straight
+away for anyone who would rather not wait. Only a clean "no usage reported" starts
+that day -- a request that failed is not an answer, so an outage or a logged-out
+moment never parks a paying account on the free readout.
+
+In between, `session.js` counts sends, by watching the transcript for a new message
 bubble; it stores a timestamp per message and prunes anything older than five
 hours. Message text is never read or stored. A batch that adds several bubbles at
 once is history arriving (a page load, a conversation switch, scrolling back) and
 is not counted; only a single bubble appearing at the end of the transcript is.
 
 The numbers refresh every five minutes in the background, so the toolbar badge and
-the popup are current even when no claude.ai tab is open. When a claude.ai tab is
+the popup are current even when no claude.ai tab is open. A free account is the
+exception described above: it is checked once a day, and the count it shows in
+between is worked out locally and current either way. When a claude.ai tab is
 open the extension asks that tab to do the fetch; otherwise it calls the endpoint
 itself. An open, visible tab keeps its own bar no more than a minute old.
 
@@ -111,7 +120,8 @@ brings the box back whenever you want it.
 - Hover anything for the detail: a bar row, or the toolbar icon itself, shows each
   window's percentage, the countdown, the clock time it resets at, and how old the
   reading is. Numbers that could not be refreshed stay on screen but fade, so a
-  stale reading never passes for a fresh one.
+  stale reading never passes for a fresh one. The free-plan number is counted here
+  rather than fetched, so it is always current and never fades.
 - Everything else lives on the Settings page (the Settings button, or right-click
   the icon â†’ Options):
   - Master on/off for the bar.
@@ -171,6 +181,10 @@ The free-plan count is an approximation by construction: it starts when you
 install rather than when the window did, so the first window can read low, and
 Claude's free cap is not published and varies with demand, which is why no
 percentage is shown against it.
+
+Because a free account is only re-checked once a day, upgrading can take up to a
+day to turn into real bars on its own. Opening the popup and clicking Refresh
+checks straight away.
 
 ## License
 
