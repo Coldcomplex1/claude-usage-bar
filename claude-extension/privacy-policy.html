@@ -12,7 +12,7 @@
 </head>
 <body>
   <h1>Privacy Policy for Claude Usage Bar</h1>
-  <p class="muted">Last updated: 9 August 2026</p>
+  <p class="muted">Last updated: 16 September 2026</p>
 
   <p>Claude Usage Bar is a browser extension that displays your Claude.ai usage
   limits (your current 5-hour session and weekly all-models usage, and an Opus
@@ -45,6 +45,16 @@
   kept in your browser and discarded once they fall outside the rolling 5-hour
   window. This counting runs only on accounts where Claude reports no usage; on a
   paid plan it never starts.</p>
+  <p>The extension also reads the short notices claude.ai itself shows you about
+  your own limit — a line such as “5 messages remaining”, a message-limit notice,
+  or the clock time your limit comes back. When it finds one it records the number
+  and the time, and uses them to work out a percentage and to correct the
+  countdown. Nothing is sent anywhere; these are read from the page already in
+  front of you.</p>
+  <p>A number that appears inside your conversation is deliberately ignored,
+  whether you wrote it or Claude did. Only claude.ai’s own interface is read, never
+  the transcript, so typing “5 messages left” into a chat cannot change what the
+  bar shows.</p>
 
   <h2>How the data is used and stored</h2>
   <p>This data is used only to render the usage bar and the extension’s popup. It is

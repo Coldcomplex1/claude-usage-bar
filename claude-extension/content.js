@@ -10,10 +10,17 @@
 // install tab without answering; see the section above fetchAndStore().
 // Session + All models are user-toggleable; Opus shows automatically only if the
 // account has it. Colors: blue < 30%, Claude orange 30-80%, red > 80%.
-// On a free account Claude reports no percentages at all (usage.js sets
-// `reported: false`), so the widget switches to the count readout instead of
-// showing a row of dashes forever: one row, the messages counted in the current
-// 5-hour window, and the countdown to when it rolls over. See session.js.
+// On a free account Claude's endpoint reports no percentages at all (usage.js
+// sets `reported: false`), so the widget shows one row built from what can be
+// worked out here instead of a row of dashes forever. What that row says depends
+// on how much is actually known (estimate.js decides, session.js counts):
+//   a hatched bar, "~55%"  Claude's own interface stated a figure and we watched
+//                          the whole window, so there is a real denominator
+//   "5 left"               Claude stated a figure but our total is not
+//                          trustworthy, so there is no honest bar to draw
+//   "12 msg"               Claude has said nothing; this is what we counted
+// A percentage that came from us rather than from Claude is always hatched and
+// always prefixed "~", so it can never be read as one of the solid bars above.
 
 (function () {
   var TOGGLE_KEY = "cub_enabled";
@@ -23,6 +30,7 @@
   var BADGE_KEY = "cub_badge";
   var SETUP_KEY = "cub_setup";
   var FREE_KEY = "cub_free_session";
+  var CALIB_KEY = "cub_free_calib";
 
   var TICK_MS = 30000;             // repaint the countdown; also the refetch check
   var POLL_MS = 60000;             // how stale the numbers may get before we refetch
@@ -35,6 +43,7 @@
   var show = { session: true, allModels: true };
   var design = "1";
   var freeStore = null;   // raw cub_free_session; summarized per paint so the window rolls
+  var calibStore = null;  // raw cub_free_calib: what Claude has told us about the limit
 
   // session/opus use a bar in Design 1; in Design 2 the weekly windows use a ring.
   var SEGS = [
@@ -51,34 +60,74 @@
   // reading from before this version (which has no `reported` field) still
   // renders the way it always did rather than flipping to the count readout.
   function isFree(){ return !!lastData && lastData.reported === false; }
-  function freeNow(){ return CUBS.summarize(freeStore); }
+  // The free readout: what session.js counted, read against whatever Claude's own
+  // interface has said about the limit (estimate.js). `pct` is null until
+  // something has calibrated it, and that null is what keeps the bar a count.
+  function freeNow(){ return CUBE.estimate(CUBS.summarize(freeStore), calibStore); }
   function plural(n, word){ return n + " " + word + (n === 1 ? "" : "s"); }
 
   var FREE_NOTE = "Free plan \u00b7 counted locally";
+  var FREE_LEFT_NOTE = "Free plan \u00b7 Claude's own figure";
   var FREE_WHY = "Claude publishes no usage percentage on the free plan, so this counts the " +
-                 "messages you send in the rolling 5-hour window. Counting starts when the " +
+                 "messages you send in the 5-hour window. Counting starts when the " +
                  "extension is installed, so the first window can read low.";
+  var FREE_WHY_OBS = "Claude publishes no usage percentage on the free plan. This is worked " +
+                     "out from what Claude itself told you about your limit, so it is close " +
+                     "but not official \u2014 and the free cap moves with demand.";
+  var FREE_WHY_LEFT = "Claude told you how many messages are left, which says nothing about " +
+                      "the total \u2014 and this browser did not see the whole window, so there " +
+                      "is no honest percentage to draw. The count left is the useful half.";
 
   function freeTip(){
     var f = freeNow();
     var t = "Session (5h): ";
-    t += f.count ? plural(f.count, "message") + " counted in this window" : "no messages counted yet";
+    if (f.exact){
+      t += "out of messages for this window";
+    } else if (f.pct != null){
+      t += Math.round(f.pct) + "% used";
+      if (f.left != null) t += " \u00b7 about " + plural(f.left, "message") + " left";
+    } else if (f.left != null){
+      t += plural(f.left, "message") + " left, per Claude";
+    } else {
+      t += f.count ? plural(f.count, "message") + " counted in this window" : "no messages counted yet";
+    }
     var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
     if (left) t += ", resets in " + left + (CUB.fmtResetAt(f.resetAt) ? " (" + CUB.fmtResetAt(f.resetAt) + ")" : "");
-    return t + "\n" + FREE_WHY;
+    return t + "\n" + (f.pct != null ? FREE_WHY_OBS : f.left != null ? FREE_WHY_LEFT : FREE_WHY);
   }
 
   function freeAria(){
     var f = freeNow();
     var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
-    return "Session: " + plural(f.count, "message") + " counted in this 5-hour window" +
-           (left ? ", resets in " + left : "") + ". No percentage on the free plan.";
+    var head, why;
+    if (f.exact){
+      head = "Session: out of messages for this window";
+      why = ". Claude said so directly.";
+    } else if (f.pct != null){
+      head = "Session: about " + Math.round(f.pct) + " percent used" +
+             (f.left != null ? ", about " + plural(f.left, "message") + " left" : "");
+      // A screen reader has no hatching to go on, so the word has to be said.
+      why = ". Estimated from what Claude told you.";
+    } else if (f.left != null){
+      head = "Session: " + plural(f.left, "message") + " left";
+      why = ". Claude's own figure. No percentage available.";
+    } else {
+      head = "Session: " + plural(f.count, "message") + " counted in this 5-hour window";
+      why = ". No percentage on the free plan.";
+    }
+    return head + (left ? ", resets in " + left : "") + why;
   }
 
-  // A count is not a meter, so the row stops claiming to be one.
-  function setCount(node){
-    node.removeAttribute("aria-valuenow");
-    node.setAttribute("role", "status");
+  // A count is not a meter, so the row stops claiming to be one. Once there is a
+  // percentage it is a meter again, and says so.
+  function setCount(node, f){
+    if (f && f.pct != null){
+      node.setAttribute("role", "progressbar");
+      node.setAttribute("aria-valuenow", String(Math.round(f.pct)));
+    } else {
+      node.removeAttribute("aria-valuenow");
+      node.setAttribute("role", "status");
+    }
     node.setAttribute("aria-valuetext", freeAria());
     node.setAttribute("aria-label", freeAria());
     node.setAttribute("title", freeTip());
@@ -217,16 +266,37 @@
     return bar;
   }
 
-  // The free readout, in the same four columns: the note stands in for the bar
-  // (exactly one of the two is ever in the grid, so nothing shifts).
+  // The free readout, in the same four columns. With nothing to fill a bar
+  // against, the note stands in for it (exactly one of the two is ever in the
+  // grid, so nothing shifts). Once Claude has stated a figure there is a real
+  // fraction to draw, and the track comes back -- hatched, and with a "~" on the
+  // number, because it is worked out from what Claude said rather than published
+  // by Claude, and must never be mistaken for the latter.
   function fillCountSeg(node){
     var f = freeNow();
-    node.querySelector(".cub-track").hidden = true;
+    var track = node.querySelector(".cub-track");
     var note = node.querySelector(".cub-note");
-    note.hidden = false; note.textContent = FREE_NOTE;
-    node.querySelector(".cub-val").textContent = f.count + " msg";
+    var val = node.querySelector(".cub-val");
+    if (f.pct != null){
+      var pct = Math.max(0, Math.min(100, Math.round(f.pct)));
+      track.hidden = false; note.hidden = true;
+      var fill = node.querySelector(".cub-fill");
+      fill.style.width = pct + "%";
+      fill.className = "cub-fill cub-est " + colorClass(pct);
+      val.textContent = (f.exact ? "" : "~") + pct + "%";
+    } else if (f.left != null){
+      // Claude said how many are left but we have no denominator we trust, so
+      // there is no bar to draw. The figure itself is the more useful half.
+      track.hidden = true;
+      note.hidden = false; note.textContent = FREE_LEFT_NOTE;
+      val.textContent = f.left + " left";
+    } else {
+      track.hidden = true;
+      note.hidden = false; note.textContent = FREE_NOTE;
+      val.textContent = f.count + " msg";
+    }
     node.querySelector(".cub-reset").textContent = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
-    setCount(node);
+    setCount(node, f);
   }
 
   function fillSeg(node, d, s){
@@ -374,17 +444,28 @@
     return el;
   }
 
-  // Free, compact: "12 msg \u00b7 2h 41m". No indicator, because there is no
-  // percentage to indicate.
+  // Free, compact: "12 msg \u00b7 2h 41m" with no indicator while there is no
+  // percentage to indicate, and "~55% \u00b7 2h 41m" with a hatched mini-bar once
+  // Claude has said something that gives it one.
   function fillCountInlineSeg(node){
     var f = freeNow();
     var ind = node.querySelector(".cub-i-ring") || node.querySelector(".cub-i-bar");
-    if (ind) ind.hidden = true;
-    node.querySelector(".cub-i-val").textContent = f.count + " msg";
+    var val = node.querySelector(".cub-i-val");
+    var bar = node.querySelector(".cub-i-fill");
+    if (f.pct != null && bar){
+      var pct = Math.max(0, Math.min(100, Math.round(f.pct)));
+      if (ind) ind.hidden = false;
+      bar.style.width = pct + "%";
+      bar.className = "cub-i-fill cub-est " + colorClass(pct);
+      val.textContent = (f.exact ? "" : "~") + pct + "%";
+    } else {
+      if (ind) ind.hidden = true;
+      val.textContent = f.left != null ? f.left + " left" : f.count + " msg";
+    }
     var reset = node.querySelector(".cub-i-reset");
     reset.hidden = false;
     reset.textContent = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
-    setCount(node);
+    setCount(node, f);
   }
 
   function fillInlineSeg(node, d, s){
@@ -642,9 +723,18 @@
   function syncFreeWatch(){
     // Counting writes cub_free_session, and that write reaches the storage
     // listener below in this tab as well as every other one, so the repaint is
-    // already handled there -- there is nothing for the callback to do.
-    if (enabled && isFree()) CUBS.watch(null);
-    else CUBS.unwatch();
+    // already handled there -- there is nothing for the callback to do. The same
+    // goes for anything estimate.js records, which lands in cub_free_calib.
+    if (enabled && isFree()){
+      CUBE.start({});
+      // estimate.js reads Claude's own limit notices off the nodes this observer
+      // is already walking, rather than putting a second observer on a page that
+      // is busy enough with one.
+      CUBS.watch(null, { onNodes: CUBE.scanNode });
+      CUBE.sweep();   // a notice can already be on screen (a reload after a limit)
+    } else {
+      CUBS.unwatch(); CUBE.stop();
+    }
   }
 
   // A failed fetch keeps the last-known numbers on screen (they are still the best
@@ -856,6 +946,11 @@
   function tick(){
     if (document.visibilityState !== "visible") return;
     if (enabled) render();
+    // A limit notice can be rendered without adding a node the observer sees, so
+    // the heartbeat that was already repainting the countdown also takes one
+    // bounded look for one. Free accounts only: on a paid one there is nothing
+    // to find and nothing is scanned.
+    if (enabled && isFree()){ CUBE.sweep(); CUBS.heartbeat(); }
     refresh(POLL_MS - 5000);
   }
 
@@ -886,7 +981,7 @@
   // answer, so it comes back with the bar if it is switched on again.
   function disable(){
     enabled = false; stopPolling(); stopPlacing(); removeWidgets(); hideSetup();
-    CUBS.unwatch();
+    CUBS.unwatch(); CUBE.stop();
   }
 
   chrome.storage.onChanged.addListener(function (changes, area){
@@ -898,6 +993,8 @@
     // Another tab counted a send, or this one did: repaint from the store
     // rather than from whatever the counter handed back.
     if (changes[FREE_KEY]){ freeStore = changes[FREE_KEY].newValue || null; if (enabled) render(); }
+    // Claude said something about the limit, here or in another tab.
+    if (changes[CALIB_KEY]){ calibStore = changes[CALIB_KEY].newValue || null; if (enabled) render(); }
     if (changes[SHOW_KEY] && changes[SHOW_KEY].newValue){ show = Object.assign({ session:true, allModels:true }, changes[SHOW_KEY].newValue); if (enabled) render(); }
     if (changes[DESIGN_KEY]) { switchDesign(changes[DESIGN_KEY].newValue === "2" ? "2" : "1"); }
     // Answered somewhere else (the install tab, or another claude.ai tab): close
@@ -931,9 +1028,10 @@
     refresh(FOCUS_MAX_AGE_MS);
   });
 
-  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, SHOW_KEY, DESIGN_KEY, SETUP_KEY, FREE_KEY], function (o){
+  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, SHOW_KEY, DESIGN_KEY, SETUP_KEY, FREE_KEY, CALIB_KEY], function (o){
     if (o[LAST_KEY]) lastData = o[LAST_KEY];
     if (o[FREE_KEY]) freeStore = o[FREE_KEY];
+    if (o[CALIB_KEY]) calibStore = o[CALIB_KEY];
     if (o[SHOW_KEY]) show = Object.assign(show, o[SHOW_KEY]);
     // Design 1 stays the fallback while setup is pending, so the bar works from
     // the moment of install rather than waiting on an answer that may not come.

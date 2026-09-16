@@ -147,6 +147,29 @@
 #cub-inline .cub-i-ring-fill.cub-mid  { stroke: var(--cub-mid); }
 #cub-inline .cub-i-ring-fill.cub-high { stroke: var(--cub-high); }
 
+/* Free plan, calibrated: a percentage worked out from what Claude's own
+   interface said, not one Claude published. It must never be mistaken for the
+   solid bars a paid account gets, so it is hatched and the number carries a "~".
+
+   Two things about this rule are deliberate. It sits AFTER every colour rule
+   above, because those use the `background` shorthand, which resets
+   background-image -- declared any earlier, the hatch would be wiped by
+   .cub-low/.cub-mid/.cub-high. And the stripe is white at low alpha rather than
+   a second colour, so the fill still reads as its warning level: an uncertain
+   85% is still red, just visibly hatched red.
+
+   The track is 5px tall (and 5px in the compact widget), so the period is kept
+   to 5px at 45deg -- roughly two stripes per bar height. Anything finer turns to
+   mush at this size, in either theme. Never animate it: a moving barber-pole
+   reads as "loading", which is a different claim. */
+#cub-bar .cub-fill.cub-est, #cub-inline .cub-i-fill.cub-est {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.5) 0 2px,
+    rgba(255, 255, 255, 0) 2px 5px
+  );
+}
+
 /* Numbers we could not refresh: still shown (they are the best we have) but
    faded, with the tooltip saying how old they are. */
 #cub-bar.cub-stale .cub-val, #cub-bar.cub-stale .cub-reset,

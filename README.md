@@ -12,10 +12,16 @@ appears too. Each bar is color-coded, blue when you are under 30%, orange from 3
 to 80%, and red above 80%, and it shows a countdown to when the limit resets.
 
 On the free plan Claude publishes no usage percentages at all, so there is nothing
-to fetch and no honest bar to fill. There the extension shows the one thing it can
-work out on its own: how many messages you have sent in the current 5-hour window,
-and the countdown to when that window rolls over. It is a count, not a percentage,
-because the free cap moves with demand, and it starts from when you install.
+to fetch. What the bar shows there depends on what Claude itself has told you.
+Claude does say things about your free limit in its own interface — how many
+messages are left, that you have run out, the time it comes back — and when it
+does, the extension reads that and turns it into a real bar. Until then it shows
+what it can count on its own: the messages you have sent in the current 5-hour
+window, and the countdown to when that window rolls over.
+
+A percentage worked out this way is always drawn hatched and always prefixed `~`,
+so it can never be mistaken for one of the solid bars a paid account gets. The
+extension never invents a limit to measure you against.
 
 There is nothing to set up. No tokens, no API keys, and no extra sign-in. As long as
 you are logged in to Claude, it just works, because it reads your usage straight from
@@ -41,6 +47,10 @@ change over time.
   design that box puts side by side.
 - `index.html` is the landing page, a single self-contained file with a live demo of
   the bar. `vercel.json` is the deploy config for it.
+- `tests/run.js` covers the logic that decides what the user is told: the counting
+  rule, the anchored window, the limit-notice parser and the estimator's
+  fallbacks. Run it with `node tests/run.js` — no dependencies, no `package.json`,
+  nothing to install, so the repo stays a clone-and-load-unpacked repo.
 
 ## How it works
 
@@ -66,10 +76,63 @@ that day -- a request that failed is not an answer, so an outage or a logged-out
 moment never parks a paying account on the free readout.
 
 In between, `session.js` counts sends, by watching the transcript for a new message
-bubble; it stores a timestamp per message and prunes anything older than five
-hours. Message text is never read or stored. A batch that adds several bubbles at
-once is history arriving (a page load, a conversation switch, scrolling back) and
-is not counted; only a single bubble appearing at the end of the transcript is.
+bubble; it stores a timestamp per message. Message text is never read or stored. A
+batch that adds several bubbles at once is history arriving (a page load, a
+conversation switch, scrolling back) and is not counted; only a single bubble
+appearing at the end of the transcript is.
+
+The window those messages fall in is **anchored**, not sliding. Claude states one
+reset time and clears everything at it, so that is what the extension models: a
+send arriving after the reset opens a new window and the count starts again. (It
+used to slide the window along its oldest surviving message, which meant that
+messages at 00:00 and 04:00, read at 05:00, came back as "1 message, resets at
+09:00" when Claude had in fact reset to zero.)
+
+`estimate.js` is what makes a percentage possible. It reads the short notices
+claude.ai shows about your own limit — "5 messages remaining", a message-limit
+notice, "until 4 PM" — off the nodes the counting observer is already walking, so
+there is no second observer on the page. From those it learns two things:
+
+- **A reset time anchors the window**, including one that opened before the
+  extension was watching. This is what fixes the countdown for anyone who installs
+  mid-window.
+- **A stated figure gives a denominator.** "5 left" when we have counted 20 means
+  the cap is 25; being cut off at 23 means the cap was 23, exactly.
+
+Three rules keep that honest:
+
+- **A number inside the conversation is never read as a limit.** Anything the
+  guard places inside the transcript or the composer is thrown out before the
+  patterns run, so typing "5 messages left" into a chat cannot move the bar.
+- **A cap derived from an incomplete count is not a denominator.** "5 left" says
+  what remains and nothing about the total; turning it into one needs
+  `cap = what we sent + what is left`, which only holds if our count was complete.
+  Install midway through a window, or have the browser shut for an hour of it, and
+  our count is a floor — the cap comes out too small and the percentage too big,
+  which would tell someone they are nearly out when they are not. So no bar is
+  drawn at all. The row shows "5 left" instead, which is the more useful half.
+- **Nothing degrades to a wrong number.** Every path can only turn a count into a
+  percentage. If Claude rewords its notices and none of the patterns match again,
+  the readout is the count it always was.
+
+### Working on the free readout
+
+It cannot be reached from a paid account, so there are hooks. In the extension's
+storage (DevTools → Application → Storage → Extension storage):
+
+- `cub_debug_plan: "free"` forces the not-reported path, so a paid account renders
+  the free readout. This is the prerequisite for the rest.
+- `cub_free_calib` is the calibration store, and writing it by hand is how you
+  drive the other two readouts without waiting to hit a real limit. One row is
+  enough — `{"caps":[{"at":<now>,"cap":25,"count":20,"kind":"remaining","whole":true}]}`
+  gives the hatched bar; `"whole":false` gives the "5 left" readout instead;
+  `"kind":"exhausted"` gives the hard stop. There is no separate debug key for
+  this because the real one is already the right shape.
+- `cub_debug_on: true` additionally logs limit-ish text that was seen on the page
+  but matched none of the patterns, which is how you find out what Claude's copy
+  has changed to. It logs to the console only and stores nothing.
+
+`node tests/run.js` covers the parsing and the estimator without a browser.
 
 The numbers refresh every five minutes in the background, so the toolbar badge and
 the popup are current even when no claude.ai tab is open. A free account is the
@@ -120,8 +183,9 @@ brings the box back whenever you want it.
 - Hover anything for the detail: a bar row, or the toolbar icon itself, shows each
   window's percentage, the countdown, the clock time it resets at, and how old the
   reading is. Numbers that could not be refreshed stay on screen but fade, so a
-  stale reading never passes for a fresh one. The free-plan number is counted here
-  rather than fetched, so it is always current and never fades.
+  stale reading never passes for a fresh one. The free-plan number is worked out
+  here rather than fetched, so it is always current and never fades; its tooltip
+  says which of the three readouts it is and where the figure came from.
 - Everything else lives on the Settings page (the Settings button, or right-click
   the icon → Options):
   - Master on/off for the bar.
@@ -177,10 +241,26 @@ as well as `utilization`, epoch or ISO reset times, and the camelCase spellings 
 each key), so a rename degrades to a slightly different reading rather than to a
 blank bar.
 
-The free-plan count is an approximation by construction: it starts when you
-install rather than when the window did, so the first window can read low, and
-Claude's free cap is not published and varies with demand, which is why no
-percentage is shown against it.
+On the free plan the readout is only ever as good as what Claude has said:
+
+- **The limit notices are undocumented UI.** If Claude rewords them, the patterns
+  in `estimate.js` stop matching and the bar falls back to the message count. It
+  degrades to less information, never to a wrong number.
+- **The free cap moves with demand,** so a figure Claude gave in one window is not
+  a promise about the next. Only a figure stated during the window in progress is
+  used as a denominator; older ones are history. This is why the bar is hatched
+  and prefixed `~`.
+- **The count is per browser profile.** Messages sent from the phone app, or from
+  another browser, are invisible to it, which makes it a floor rather than a
+  total. A figure from Claude is the only thing that corrects for this, because it
+  comes from Claude and so covers every device.
+- **A window the extension did not watch from the start gets no bar.** Installing
+  mid-window, or the browser being shut for part of one, means the count has a
+  hole in it; see the rule above. The reading shown is "5 left" rather than a
+  percentage that would be wrong in the alarming direction.
+- **Free accounts get the session row only.** Claude publishes no weekly figure
+  for them and there is no way to infer one from messages, so the weekly and Opus
+  rows stay hidden rather than being filled with something invented.
 
 Because a free account is only re-checked once a day, upgrading can take up to a
 day to turn into real bars on its own. Opening the popup and clicking Refresh

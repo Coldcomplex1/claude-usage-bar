@@ -4,6 +4,7 @@
 var LAST_KEY = "cub_last";
 var SHOW_KEY = "cub_show";
 var FREE_KEY = "cub_free_session";
+var CALIB_KEY = "cub_free_calib";
 var DEFAULT_SHOW = { session: true, allModels: true };
 var FRESH_MS = 60000;      // opening the popup on newer numbers than this costs no request
 
@@ -15,22 +16,65 @@ function colorClass(p){ return p==null ? "" : p>80 ? "high" : p>=30 ? "mid" : "l
 function esc(t){ return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function plural(n, w){ return n + " " + w + (n === 1 ? "" : "s"); }
 
-// The free-plan row: a count and a countdown, with a line saying why there is no
-// percentage. Claude publishes none for free accounts, and inventing one would
-// need a cap that moves with demand.
+// The free-plan row. Claude publishes no percentage for free accounts, so what
+// this shows depends entirely on what Claude's own interface has said:
+//
+//   a percentage  it named a figure and we watched the whole window, so there is
+//                 a real denominator -- drawn hatched, prefixed "~"
+//   "5 left"      it named a figure but we cannot trust our own total, so there
+//                 is no honest bar; the figure itself is the useful half
+//   a count       it has said nothing, so we show what we counted
+//
+// The note under the row says which of the three this is, in words, because the
+// hatching alone is not an explanation.
 function freeHtml(f){
   var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
   var at = left ? CUB.fmtResetAt(f.resetAt) : "";
-  var aria = "Session: " + plural(f.count, "message") + " counted in this 5-hour window" +
-             (left ? ", resets in " + left : "");
-  return '<div class="p-row" role="status" aria-label="'+esc(aria)+'">'+
+  var pct = f.pct != null ? Math.max(0, Math.min(100, Math.round(f.pct))) : null;
+
+  var val, aria, note;
+  if (f.exact){
+    val = "100%";
+    aria = "Session: out of messages for this window. Claude said so directly.";
+    note = "Free plan: Claude says you are out of messages for this window. This one is " +
+           "not an estimate — it is what Claude told you.";
+  } else if (pct != null){
+    val = "~" + pct + "%";
+    aria = "Session: about " + pct + " percent used" +
+           (f.left != null ? ", about " + plural(f.left, "message") + " left" : "") +
+           ". Estimated from what Claude told you.";
+    note = "Free plan: Claude publishes no percentage, so this is worked out from what " +
+           "Claude itself told you about your limit. The free cap moves with demand, so " +
+           "treat it as close rather than exact.";
+  } else if (f.left != null){
+    val = plural(f.left, "message") + " left";
+    aria = "Session: " + plural(f.left, "message") + " left, per Claude. No percentage available.";
+    note = "Free plan: Claude told you how many messages are left, which says nothing about " +
+           "the total \u2014 and this browser did not see the whole window, so there is no " +
+           "honest percentage to draw.";
+  } else {
+    val = f.count + " msg";
+    aria = "Session: " + plural(f.count, "message") + " counted in this 5-hour window" +
+           (left ? ", resets in " + left : "");
+    note = "Free plan: Claude reports no usage percentage, so this counts the messages you " +
+           "send in the 5-hour window. Counting starts at install.";
+  }
+
+  return '<div class="p-row" '+
+      (pct != null
+        ? 'role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+pct+'" '+
+          'aria-valuetext="'+esc(aria)+'"'
+        : 'role="status"')+
+      ' aria-label="'+esc(aria)+'">'+
       '<div class="p-row-head">'+
         '<span class="p-label">Session</span><span class="p-sub">5h</span>'+
-        '<span class="p-val">'+esc(f.count + " msg")+'</span></div>'+
+        '<span class="p-val">'+esc(val)+'</span></div>'+
+      (pct != null
+        ? '<div class="p-track"><div class="p-fill est '+colorClass(pct)+'" style="width:'+pct+'%"></div></div>'
+        : '')+
       (left ? '<div class="p-reset">resets in '+esc(left)+(at ? ' \u00b7 '+esc(at) : '')+'</div>' : '')+
     '</div>'+
-    '<div class="p-note">Free plan: Claude reports no usage percentage, so this counts '+
-      'the messages you send in the rolling 5-hour window. Counting starts at install.</div>';
+    '<div class="p-note">'+esc(note)+'</div>';
 }
 
 function rowHtml(label, sub, d){
@@ -54,7 +98,7 @@ function render(data, free){
   if (!data){ rows.innerHTML = '<div class="p-empty">No data yet</div>'; return; }
   // Claude answered with nothing in it: the free plan. Show what we counted
   // ourselves rather than three rows of dashes.
-  if (data.reported === false){ rows.innerHTML = freeHtml(free || CUBS.summarize(null)); return; }
+  if (data.reported === false){ rows.innerHTML = freeHtml(free || CUBE.estimate(null, null)); return; }
   var html = rowHtml("Session","5h",data.session) + rowHtml("All models","7d",data.allModels);
   if (data.opus && data.opus.available) html += rowHtml("Opus","7d",data.opus);
   rows.innerHTML = html;
@@ -104,15 +148,22 @@ async function refresh(force){
   } finally { setBusy(false); }
 }
 
-// Paint with the counted free session read alongside, so the popup never has to
-// care which of the two readouts it is about to draw.
+// The free readout, from both halves of it: what we counted, and what Claude has
+// said about the limit. Painting never has to care which of the three readouts
+// it is about to draw -- estimate() has already decided.
+function readFree(cb){
+  chrome.storage.local.get([FREE_KEY, CALIB_KEY], function (o){
+    cb(CUBE.estimate(CUBS.summarize(o[FREE_KEY]), o[CALIB_KEY]));
+  });
+}
+
 function paint(data){
   // Set before the free branch's asynchronous read, not only inside render():
   // showAge() and refresh() both run straight after paint() and read `shown`, and
   // on the free plan that read used to land a tick too late -- which showed no
   // "Checked ..." line and sent a request on every popup open.
   shown = data || null;
-  if (data && data.reported === false) CUBS.read(function (f){ render(data, f); });
+  if (data && data.reported === false) readFree(function (f){ render(data, f); });
   else render(data);
 }
 
@@ -147,8 +198,12 @@ document.addEventListener("DOMContentLoaded", function(){
   chrome.storage.onChanged.addListener(function(changes, area){
     if (area !== "local") return;
     if (changes[LAST_KEY] && changes[LAST_KEY].newValue){ paint(changes[LAST_KEY].newValue); showAge(); }
-    // A tab counted a send while the popup was open.
-    if (changes[FREE_KEY] && shown && shown.reported === false) render(shown, CUBS.summarize(changes[FREE_KEY].newValue));
+    // A tab counted a send, or read something Claude said, while the popup was
+    // open. Re-read both halves rather than patching one in: the estimate is a
+    // function of the pair, so half of it is not enough to repaint from.
+    if ((changes[FREE_KEY] || changes[CALIB_KEY]) && shown && shown.reported === false){
+      readFree(function (f){ render(shown, f); });
+    }
   });
   document.getElementById("refresh").addEventListener("click", function(){ refresh(true); });
   document.getElementById("settings").addEventListener("click", function(){

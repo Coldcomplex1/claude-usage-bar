@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Claude Usage Bar</title>
-<meta name="description" content="A small Chrome extension that shows your Claude.ai usage, your 5 hour session and your weekly limits, in a slim bar under the chat box. On the free plan it counts your messages in the 5 hour window instead. No sign-in, no tokens, nothing leaves your browser." />
+<meta name="description" content="A small Chrome extension that shows your Claude.ai usage, your 5 hour session and your weekly limits, in a slim bar under the chat box. On the free plan it works out what it can from what Claude itself tells you. No sign-in, no tokens, nothing leaves your browser." />
 <meta property="og:title" content="Claude Usage Bar" />
 <meta property="og:description" content="See how much Claude you have left, right under the chat box." />
 <meta property="og:type" content="website" />
@@ -239,6 +239,14 @@ section{ scroll-margin-top:76px; }
 .cub-bar .cub-fill.cub-mid{ background:#d85a30; }
 .cub-bar .cub-fill.cub-high{ background:#e2564d; }
 .cub-bar .cub-val{ text-align:right; font-weight:600; font-variant-numeric:tabular-nums; }
+/* Free plan: the note stands in for the bar when there is nothing to fill it
+   with, and the fill is hatched when the percentage was worked out from what
+   Claude said rather than published by Claude. Mirrors content.css. */
+.cub-bar .cub-note{ min-width:0; font-size:10px; opacity:.55; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cub-bar .cub-track[hidden], .cub-bar .cub-note[hidden]{ display:none; }
+.cub-bar .cub-fill.cub-est, .cub-inline .cub-i-fill.cub-est{
+  background-image:repeating-linear-gradient(45deg, rgba(255,255,255,.5) 0 2px, rgba(255,255,255,0) 2px 5px); }
+.p-fill.est{ background-image:repeating-linear-gradient(-45deg, rgba(255,255,255,.45) 0 2px, rgba(255,255,255,0) 2px 5px); }
 .cub-bar .cub-reset{ text-align:left; font-size:10px; opacity:.55; white-space:nowrap; overflow:hidden; }
 
 .mock[data-claude-theme="dark"] .cub-bar{ color:#e7e7e3; background:rgba(45,45,43,.7); border-color:rgba(255,255,255,.12); }
@@ -702,6 +710,13 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
               <button class="chip" data-preset="mid">Getting busy</button>
               <button class="chip" data-preset="high">Almost out</button>
             </div>
+            <div class="presets">
+              <button class="chip" data-free="">Paid plan</button>
+              <button class="chip" data-free="counted">Free: counted</button>
+              <button class="chip" data-free="left">Free: Claude's figure</button>
+              <button class="chip" data-free="estimated">Free: estimated</button>
+              <button class="chip" data-free="blocked">Free: out</button>
+            </div>
           </div>
 
           <div class="o-card">
@@ -874,7 +889,7 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
         </details>
         <details>
           <summary>Do I need an API key or a paid plan?</summary>
-          <p>Neither. There is nothing to buy and nothing to paste in. On a paid plan it reads your real percentages straight from Claude. On the free plan Claude publishes no usage figures at all, so there is nothing to read: the bar counts the messages you send in the current 5-hour window instead, and shows the countdown to when that window rolls over.</p>
+          <p>Neither. There is nothing to buy and nothing to paste in. On a paid plan it reads your real percentages straight from Claude. On the free plan Claude publishes no usage figures, so the bar works with what it can get. Claude does tell you things about your free limit in its own interface &mdash; how many messages are left, that you have run out, the time it comes back &mdash; and when it does, the bar reads that and shows a real percentage, drawn hatched and prefixed &ldquo;~&rdquo; so it is never mistaken for a figure Claude published. Until Claude says something, it counts the messages you send in the current 5-hour window and shows the countdown. It never invents a limit to measure you against.</p>
         </details>
         <details>
           <summary>Does it slow Claude down?</summary>
@@ -882,7 +897,7 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
         </details>
         <details>
           <summary>The bar shows a dash, or an exclamation mark.</summary>
-          <p>A dash means it has no numbers yet, usually because you are signed out. An exclamation mark means the request failed. Refreshing claude.ai fixes most of it. If it sticks around, Claude may have changed something on their end. A free account is not this case: it shows a message count rather than a dash, because Claude reports no percentage to show.</p>
+          <p>A dash means it has no numbers yet, usually because you are signed out. An exclamation mark means the request failed. Refreshing claude.ai fixes most of it. If it sticks around, Claude may have changed something on their end. A free account is never this case: it shows a hatched percentage, or Claude&rsquo;s own count of what is left, or the messages it counted &mdash; whichever it actually knows, but never a dash.</p>
         </details>
         <details>
           <summary>Can this break?</summary>
@@ -960,8 +975,25 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
     session:42, allModels:68, opus:12, opusAvailable:true,
     showSession:true, showAllModels:true,
     badgeEnabled:true, badgeSource:"session",
-    theme:"light", popupOpen:false
+    theme:"light", popupOpen:false,
+    // null = a paid account. Otherwise the free readout, which has three shapes
+    // depending on what Claude's own interface has said. See estimate.js.
+    free:null
   };
+
+  // The same shape claude-extension/estimate.js hands the real widget.
+  var FREE = {
+    counted:   { pct:null, left:null, count:12, exact:false, note:"Free plan \u00b7 counted locally" },
+    left:      { pct:null, left:5,    count:12, exact:false, note:"Free plan \u00b7 Claude's own figure" },
+    estimated: { pct:80,   left:5,    count:20, exact:false, note:"" },
+    blocked:   { pct:100,  left:0,    count:23, exact:true,  note:"" }
+  };
+  function freeNow(){ return S.free ? FREE[S.free] : null; }
+  function freeVal(f){
+    return f.pct != null ? (f.exact ? "" : "~") + f.pct + "%"
+         : f.left != null ? f.left + " left"
+         : f.count + " msg";
+  }
 
   function iso(ms){ return new Date(ms).toISOString(); }
   function win(pct, resetAt, available){
@@ -984,6 +1016,7 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
     return '<div class="cub-seg" role="img" data-seg="'+s.key+'" title="'+s.tip+'">'+
       '<span class="cub-label"><span class="cub-name">'+s.label+'</span> <span class="cub-sub">'+s.sub+'</span></span>'+
       '<span class="cub-track"><span class="cub-fill"></span></span>'+
+      '<span class="cub-note" hidden></span>'+
       '<span class="cub-val">&#8211;</span>'+
       '<span class="cub-reset"></span>'+
     '</div>';
@@ -1011,14 +1044,36 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
     node.setAttribute("aria-label", label + ": " + pct + "% used" + (r ? ", resets in " + r : ""));
   }
 
+  // The free row, in the same four columns: exactly one of the track and the
+  // note is ever in the grid, so nothing shifts.
+  function fillFreeSeg(node){
+    var f = freeNow();
+    var track = node.querySelector(".cub-track");
+    var note = node.querySelector(".cub-note");
+    if (f.pct != null){
+      track.hidden = false; note.hidden = true;
+      var fill = node.querySelector(".cub-fill");
+      fill.style.width = f.pct + "%";
+      fill.className = "cub-fill cub-est " + colorClass(f.pct);
+    } else {
+      track.hidden = true; note.hidden = false; note.textContent = f.note;
+    }
+    node.querySelector(".cub-val").textContent = freeVal(f);
+    node.querySelector(".cub-reset").textContent = "2h 41m";
+    node.setAttribute("aria-label", "Session: " + freeVal(f) + ", resets in 2h 41m");
+  }
+
   function renderBar(d, show){
     var any = false;
     SEGS.forEach(function(s){
       var node = barEl.querySelector('[data-seg="'+s.key+'"]');
       var w = d[s.key];
-      var canShow = s.opus ? !!(w && w.available) : (show[s.key] !== false);
+      // Free: the session row only. The weekly windows do not exist on that
+      // plan, so there is nothing honest to put in them.
+      var canShow = S.free ? (s.key === "session" && show.session !== false)
+                  : s.opus ? !!(w && w.available) : (show[s.key] !== false);
       node.hidden = !canShow;
-      if (canShow){ any = true; fillSeg(node, w, s.label); }
+      if (canShow){ any = true; S.free ? fillFreeSeg(node) : fillSeg(node, w, s.label); }
     });
     barEl.style.display = (any && S.enabled && S.design === "1") ? "" : "none";
   }
@@ -1103,14 +1158,30 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
     node.setAttribute("title", s.label + " (" + s.sub + "): " + pct + "%" + (r ? ", resets in " + r : ""));
   }
 
+  function fillFreeInlineSeg(node){
+    var f = freeNow();
+    var ind = node.querySelector(".cub-i-ring") || node.querySelector(".cub-i-bar");
+    var bar = node.querySelector(".cub-i-fill");
+    if (f.pct != null && bar){
+      if (ind) ind.hidden = false;
+      bar.style.width = f.pct + "%";
+      bar.className = "cub-i-fill cub-est " + colorClass(f.pct);
+    } else if (ind) ind.hidden = true;
+    node.querySelector(".cub-i-val").textContent = freeVal(f);
+    var reset = node.querySelector(".cub-i-reset");
+    if (reset){ reset.hidden = false; reset.textContent = "2h 41m"; }
+    node.setAttribute("aria-label", "Session: " + freeVal(f) + ", resets in 2h 41m");
+  }
+
   function renderInline(d, show){
     var any = false;
     SEGS.forEach(function(s){
       var node = inlineEl.querySelector('[data-seg="'+s.key+'"]');
       var w = d[s.key];
-      var canShow = s.opus ? !!(w && w.available) : (show[s.key] !== false);
+      var canShow = S.free ? (s.key === "session" && show.session !== false)
+                  : s.opus ? !!(w && w.available) : (show[s.key] !== false);
       node.hidden = !canShow;
-      if (canShow){ any = true; fillInlineSeg(node, w, s); }
+      if (canShow){ any = true; S.free ? fillFreeInlineSeg(node) : fillInlineSeg(node, w, s); }
     });
     inlineEl.style.display = (any && S.enabled && S.design === "2") ? "" : "none";
   }
@@ -1130,6 +1201,23 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
     '</div>';
   }
   function renderPopup(d){
+    if (S.free){
+      var f = freeNow();
+      rowsEl.innerHTML = '<div class="p-row"><div class="p-row-head">'+
+        '<span class="p-label">Session</span><span class="p-sub">5h</span>'+
+        '<span class="p-val">'+freeVal(f)+'</span></div>'+
+        (f.pct != null
+          ? '<div class="p-track"><div class="p-fill est '+popClass(f.pct)+'" style="width:'+f.pct+'%"></div></div>'
+          : '')+
+        '<div class="p-reset">resets 2h 41m</div></div>'+
+        '<div class="p-note">'+(
+          f.exact ? "Claude says you are out of messages for this window."
+          : f.pct != null ? "Claude publishes no percentage on the free plan; this is worked out from what Claude itself told you."
+          : f.left != null ? "Claude told you how many are left, which says nothing about the total, so there is no honest percentage to draw."
+          : "Claude reports no usage percentage, so this counts the messages you send in the 5-hour window."
+        )+'</div>';
+      return;
+    }
     var html = rowHtml("Session","5h",d.session) + rowHtml("All models","7d",d.allModels);
     if (d.opus && d.opus.available) html += rowHtml("Opus","7d",d.opus);
     rowsEl.innerHTML = html;
@@ -1147,6 +1235,15 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
   }
   function renderBadge(d){
     if (!S.enabled || !S.badgeEnabled){ badgeEl.hidden = true; return; }
+    if (S.free){
+      var f = freeNow();
+      badgeEl.hidden = false;
+      badgeEl.textContent = f.pct != null ? (f.exact ? "" : "~") + f.pct
+                          : f.left != null ? String(f.left) : String(f.count);
+      badgeEl.style.background = f.pct != null ? badgeColor(f.pct)
+                               : (f.left === 0 ? "#e2564d" : "#378add");
+      return;
+    }
     var pct = badgePct(d, S.badgeSource);
     if (pct == null){ badgeEl.hidden = true; return; }
     badgeEl.hidden = false;
@@ -1219,6 +1316,18 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
     mid:  { session:47, allModels:62, opus:38 },
     high: { session:93, allModels:88, opus:71 }
   };
+  // Free-plan readouts. A hatched bar is the one thing on this page that has to
+  // be seen rather than described, so the demo can switch to each of them.
+  var freeBtns = document.querySelectorAll("[data-free]");
+  freeBtns.forEach(function(b){
+    on(b, "click", function(){
+      freeBtns.forEach(function(x){ x.setAttribute("aria-pressed","false"); });
+      b.setAttribute("aria-pressed","true");
+      S.free = b.getAttribute("data-free") || null;
+      render();
+    });
+  });
+
   var presetBtns = document.querySelectorAll("[data-preset]");
   function clearPreset(){ presetBtns.forEach(function(b){ b.setAttribute("aria-pressed","false"); }); }
   presetBtns.forEach(function(b){

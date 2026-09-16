@@ -23,6 +23,16 @@ body {
 .p-fill.low  { background: #378add; }
 .p-fill.mid  { background: #d85a30; }
 .p-fill.high { background: #e2564d; }
+/* Free plan: a percentage worked out from what Claude said, not one Claude
+   published. Hatched so it can never be mistaken for the solid bars a paid
+   account gets. Declared after the colour rules on purpose -- those use the
+   `background` shorthand, which resets background-image, so the hatch has to
+   come later to survive. Never animate the stripes: a moving barber-pole reads
+   as "loading", which is a different claim. */
+.p-fill.est {
+  background-image: repeating-linear-gradient(
+    -45deg, rgba(255,255,255,0.45) 0 2px, rgba(255,255,255,0) 2px 5px);
+}
 .p-reset { margin-top: 3px; font-size: 10px; opacity: 0.55; }
 
 .p-show { margin-top: 14px; }

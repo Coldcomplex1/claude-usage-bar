@@ -14,13 +14,16 @@
 //
 // The content script reacts to the cub_enabled storage change to show/hide the bar.
 
-importScripts("usage.js", "session.js");   // classic service worker: CUB.getUsage(), CUBS.summarize()
+// classic service worker: CUB.getUsage(), CUBS.summarize(), CUBE.estimate()
+importScripts("usage.js", "session.js", "estimate.js");
 
 var TOGGLE_KEY = "cub_enabled";
 var LAST_KEY = "cub_last";
 var BADGE_KEY = "cub_badge";
 var SETUP_KEY = "cub_setup";     // first-run chooser: { done, at } once answered
 var FREE_KEY = "cub_free_session";  // free plan: locally counted sends (session.js)
+var CALIB_KEY = "cub_free_calib";   // free plan: what Claude has told us (estimate.js)
+var INSTALL_KEY = "cub_installed_at";
 var HEALTH_KEY = "cub_health";   // refresh bookkeeping/backoff; nothing renders it
 var DEFAULT_BADGE = { enabled: false, source: "session" };
 
@@ -39,9 +42,12 @@ function badgeColor(pct){ return pct > 80 ? BADGE_HIGH : pct >= 30 ? BADGE_MID :
 
 function winPct(m){ return (m && m.available && m.pct != null) ? Math.round(m.pct) : null; }
 
-// A free account has no percentage to show, so the badge carries the counted
-// message total instead, in the neutral colour: a count is not 0-100, and
-// running it through the usage thresholds would read as a warning it is not.
+// A free account gets no percentage from Claude's endpoint, so the badge carries
+// whichever of the two the free readout has: a percentage once Claude's own
+// interface has stated a figure we could calibrate against (estimate.js), and
+// until then the counted message total in the neutral colour -- a count is not
+// 0-100, and running it through the usage thresholds would read as a warning it
+// is not.
 function isFree(data){ return !!data && data.reported === false; }
 
 // The % the badge should show for the chosen source, or null if unavailable.
@@ -62,8 +68,21 @@ function renderBadge(enabled, badge, data, free){
   if (enabled === false || !badge.enabled) return clearBadge();
   var text, color;
   if (isFree(data)){
-    if (!free || !free.count) return clearBadge();
-    text = String(free.count); color = BADGE_LOW;
+    if (!free) return clearBadge();
+    if (free.pct != null){
+      // The "~" is not decoration. A badge has room for about four characters
+      // and none for the difference between a figure Claude published and one
+      // worked out from what it said, so it stays conservative on both.
+      var fp = Math.round(free.pct);
+      text = (free.exact ? "" : "~") + fp; color = badgeColor(fp);
+    } else if (free.left != null){
+      // Claude's own count of what is left. Not a percentage, so not run through
+      // the usage thresholds -- except at zero, which is worth the red.
+      text = String(free.left); color = free.left === 0 ? BADGE_HIGH : BADGE_LOW;
+    } else {
+      if (!free.count) return clearBadge();
+      text = String(free.count); color = BADGE_LOW;
+    }
   } else {
     var pct = badgePct(data, badge.source);
     if (pct == null) return clearBadge();
@@ -86,11 +105,25 @@ function titleFor(data, free){
   if (isFree(data)){
     var left = free && free.resetAt ? CUB.fmtReset(free.resetAt) : "";
     var n = (free && free.count) || 0;
-    return base + "\nSession (5h): " + n + (n === 1 ? " message" : " messages") + " counted" +
-      (left ? " \u00b7 resets in " + left : "") +
-      "\nClaude reports no usage percentage on the free plan." +
-      // Not "Updated": the count above is live, and this timestamp dates only the
-      // once-a-day check for a percentage, which is hours old by design.
+    var head, why;
+    if (free && free.exact){
+      head = "\nSession (5h): out of messages for this window";
+      why = "Claude said so directly. This one is not an estimate.";
+    } else if (free && free.pct != null){
+      head = "\nSession (5h): " + Math.round(free.pct) + "% used" +
+             (free.left != null ? " \u00b7 about " + free.left + " left" : "");
+      why = "Claude publishes no percentage on the free plan; this is worked out from what it told you.";
+    } else if (free && free.left != null){
+      head = "\nSession (5h): " + free.left + (free.left === 1 ? " message" : " messages") + " left";
+      why = "Claude's own figure. It says nothing about the total, so there is no percentage to show.";
+    } else {
+      head = "\nSession (5h): " + n + (n === 1 ? " message" : " messages") + " counted";
+      why = "Claude reports no usage percentage on the free plan.";
+    }
+    return base + head +
+      (left ? " \u00b7 resets in " + left : "") + "\n" + why +
+      // Not "Updated": the readout above is live, and this timestamp dates only
+      // the once-a-day check for a percentage, which is hours old by design.
       (data.fetchedAt ? "\nChecked " + CUB.fmtAgo(data.fetchedAt) : "");
   }
   var lines = [];
@@ -107,9 +140,11 @@ function titleFor(data, free){
 }
 
 function refreshBadge(){
-  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, BADGE_KEY, FREE_KEY], function (o){
+  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, BADGE_KEY, FREE_KEY, CALIB_KEY], function (o){
     var badge = Object.assign({}, DEFAULT_BADGE, o[BADGE_KEY] || {});
-    var free = CUBS.summarize(o[FREE_KEY]);
+    // The free readout: what we counted, plus whatever Claude has told us about
+    // the limit. With nothing to calibrate against this is the count as before.
+    var free = CUBE.estimate(CUBS.summarize(o[FREE_KEY]), o[CALIB_KEY]);
     renderBadge(o[TOGGLE_KEY] !== false, badge, o[LAST_KEY], free);
     chrome.action.setTitle({ title: titleFor(o[LAST_KEY], free) });
   });
@@ -127,7 +162,8 @@ chrome.commands.onCommand.addListener(function (command) {
 // all wake the service worker here and repaint the badge.
 chrome.storage.onChanged.addListener(function (changes, area){
   if (area !== "local") return;
-  if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY] || changes[FREE_KEY]) refreshBadge();
+  if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY] ||
+      changes[FREE_KEY] || changes[CALIB_KEY]) refreshBadge();
 });
 
 // ---- Background refresh --------------------------------------------------
@@ -258,7 +294,25 @@ function openSetupIfNeeded(details){
   });
 }
 
+// When counting began. A cap learned from Claude ("5 messages left") is only a
+// true cap if we watched the whole window: install midway through one and our
+// count is short by whatever came before, so the cap would be biased low.
+// estimate.js compares the window's start against this to tell the two apart.
+//
+// Written on "update" as well as "install", because this listener fires for
+// both and there is no record of the original install to recover. Dating the
+// clock at the upgrade is the conservative direction: the window in progress is
+// treated as one we did not see the start of, and the next one to open is the
+// first allowed to set a cap.
+function markInstalled(){
+  chrome.storage.local.get([INSTALL_KEY], function (o){
+    if (typeof o[INSTALL_KEY] === "number") return;
+    chrome.storage.local.set({ [INSTALL_KEY]: Date.now() });
+  });
+}
+
 chrome.runtime.onInstalled.addListener(function (details){
+  markInstalled();
   refreshBadge(); ensureAlarm(); doRefresh("install");
   openSetupIfNeeded(details);
 });
