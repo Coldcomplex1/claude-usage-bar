@@ -13,7 +13,8 @@
 // per-model or per-surface limit the plan has (Fable, Sonnet, Cowork...), and
 // the extra-usage spend when there is news in it. Session, All models, the
 // scoped limits and the spend are each user-toggleable (cub_show). Colors: blue
-// < 30%, Claude orange 30-80%, red > 80%.
+// < 30%, Claude orange 30-80%, red > 80% by default; Settings can move both
+// points (cub_prefs), and can hide the bar until usage reaches a level.
 // On a free account Claude reports no percentages at all (usage.js sets
 // `reported: false`), so the widget switches to the count readout instead of
 // showing a row of dashes forever: one row, the messages counted in the current
