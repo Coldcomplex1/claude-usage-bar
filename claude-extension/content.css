@@ -9,7 +9,7 @@
    alone painted a light bar on a dark page for anyone whose claude.ai theme
    and OS theme disagree. */
 
-#cub-bar.cub-bar, #cub-inline.cub-inline, #cub-setup.cub-setup {
+#cub-bar.cub-bar, #cub-inline.cub-inline, #cub-setup.cub-setup, #cub-toast.cub-toast {
   --cub-fg: #3d3d3a;
   --cub-bg: rgba(255, 255, 255, 0.72);
   --cub-border: rgba(0, 0, 0, 0.08);
@@ -23,7 +23,8 @@
   --cub-surface: #ffffff;
   --cub-dim: rgba(0, 0, 0, 0.34);
 }
-#cub-bar.cub-bar.cub-theme-dark, #cub-inline.cub-inline.cub-theme-dark, #cub-setup.cub-setup.cub-theme-dark {
+#cub-bar.cub-bar.cub-theme-dark, #cub-inline.cub-inline.cub-theme-dark, #cub-setup.cub-setup.cub-theme-dark,
+#cub-toast.cub-toast.cub-theme-dark {
   --cub-fg: #e7e7e3;
   --cub-bg: rgba(45, 45, 43, 0.7);
   --cub-border: rgba(255, 255, 255, 0.12);
@@ -33,7 +34,7 @@
 }
 @media (prefers-color-scheme: dark) {
   #cub-bar.cub-bar:not(.cub-theme-light), #cub-inline.cub-inline:not(.cub-theme-light),
-  #cub-setup.cub-setup:not(.cub-theme-light) {
+  #cub-setup.cub-setup:not(.cub-theme-light), #cub-toast.cub-toast:not(.cub-theme-light) {
     --cub-fg: #e7e7e3;
     --cub-bg: rgba(45, 45, 43, 0.7);
     --cub-border: rgba(255, 255, 255, 0.12);
@@ -284,7 +285,31 @@
   #cub-setup .cub-su-designs { flex-direction: column; }
 }
 
+/* An alert (alerts.js), as a toast near the top right of claude.ai. Scoped and
+   explicit for the same reason as everything above: the page's styles stay
+   out, ours stay in. */
+#cub-toast.cub-toast {
+  position: fixed; top: 16px; right: 16px; z-index: 2147483000;
+  box-sizing: border-box; width: min(340px, calc(100vw - 32px));
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 12px 14px;
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: 12.5px; line-height: 1.4; color: var(--cub-fg); text-align: left;
+  background: var(--cub-surface); border: 1px solid var(--cub-border); border-left: 3px solid var(--cub-mid);
+  border-radius: 10px; box-shadow: 0 10px 32px rgba(0,0,0,0.22);
+  animation: cub-toast-in 0.18s ease-out;
+}
+#cub-toast .cub-t-body { flex: 1; min-width: 0; }
+#cub-toast .cub-t-title { font-weight: 650; font-size: 13px; }
+#cub-toast .cub-t-msg { opacity: 0.75; margin-top: 2px; }
+#cub-toast .cub-t-x {
+  flex: none; width: 22px; height: 22px; margin: -3px -2px 0 0; padding: 0; border: 0; border-radius: 6px;
+  background: none; color: inherit; font: inherit; font-size: 16px; line-height: 1; opacity: 0.5; cursor: pointer;
+}
+#cub-toast .cub-t-x:hover { opacity: 0.9; background: var(--cub-track); }
+@keyframes cub-toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   #cub-bar .cub-fill, #cub-inline .cub-i-fill, #cub-inline .cub-i-ring-fill { transition: none; }
+  #cub-toast.cub-toast { animation: none; }
   #cub-setup .cub-su-switch, #cub-setup .cub-su-switch::before { transition: none; }
 }

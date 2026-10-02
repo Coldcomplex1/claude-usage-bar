@@ -29,6 +29,7 @@
   var FREE_KEY = "cub_free_session";
   var INSIGHTS_KEY = "cub_insights";  // burn-rate forecasts, worked out by the service worker
   var PREFS_KEY = "cub_prefs";
+  var NOTICE_KEY = "cub_notice";      // the latest alert, for a toast (alerts.js)
 
   var TICK_MS = 30000;             // repaint the countdown; also the refetch check
   var POLL_MS = 60000;             // how stale the numbers may get before we refetch
@@ -333,7 +334,7 @@
   }
 
   function applyTheme(){
-    [barEl, inlineEl, setupEl].forEach(function(el){
+    [barEl, inlineEl, setupEl, toastEl].forEach(function(el){
       if (!el) return;
       el.classList.toggle("cub-theme-dark", theme === "dark");
       el.classList.toggle("cub-theme-light", theme === "light");
@@ -950,6 +951,51 @@
   }
 
   // ===================================================================
+  // Alerts. The service worker decides when something is worth saying
+  // (alerts.js) and, unless the user chose desktop notifications, leaves it in
+  // cub_notice. A visible tab shows it as a toast near the top of the page,
+  // then marks it seen so other tabs do not repeat it. A tab that becomes
+  // visible within a few minutes of an alert nobody saw yet shows it then.
+  // ===================================================================
+  var toastEl = null, toastTimer = null, toastShown = "";
+  var NOTICE_FRESH_MS = 10 * 60 * 1000;
+  var TOAST_MS = 12000;
+
+  function hideToast(){
+    if (toastTimer){ clearTimeout(toastTimer); toastTimer = null; }
+    if (toastEl && toastEl.isConnected) toastEl.remove();
+  }
+
+  function showNotice(n){
+    if (!n || !n.id || n.seen || n.id === toastShown) return;
+    if (!enabled || document.visibilityState !== "visible" || !document.body) return;
+    if (Date.now() - (n.at || 0) > NOTICE_FRESH_MS) return;
+    toastShown = n.id;
+    if (!toastEl){
+      toastEl = document.createElement("div");
+      toastEl.id = "cub-toast"; toastEl.className = "cub-toast";
+      toastEl.setAttribute("role", "status");
+      toastEl.setAttribute("aria-live", "polite");
+      toastEl.innerHTML = '<div class="cub-t-body"><div class="cub-t-title"></div><div class="cub-t-msg"></div></div>' +
+                          '<button class="cub-t-x" type="button" aria-label="Dismiss">\u00d7</button>';
+      toastEl.querySelector(".cub-t-x").addEventListener("click", hideToast);
+      toastEl.addEventListener("mouseenter", function(){ if (toastTimer){ clearTimeout(toastTimer); toastTimer = null; } });
+      toastEl.addEventListener("mouseleave", function(){ toastTimer = setTimeout(hideToast, TOAST_MS / 2); });
+    }
+    toastEl.querySelector(".cub-t-title").textContent = n.title || "Claude usage";
+    toastEl.querySelector(".cub-t-msg").textContent = n.message || "";
+    applyTheme();
+    document.body.appendChild(toastEl);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, TOAST_MS);
+    chrome.storage.local.set({ [NOTICE_KEY]: Object.assign({}, n, { seen: Date.now() }) });
+  }
+
+  function checkNotice(){
+    chrome.storage.local.get([NOTICE_KEY], function(o){ showNotice(o[NOTICE_KEY]); });
+  }
+
+  // ===================================================================
   // First-run setup box. background.js opens welcome.html in a tab the moment
   // the extension is installed; this is the second chance, for anyone who
   // closed that tab without answering. Asking here has one thing the tab
@@ -1132,7 +1178,7 @@
   // The setup box only hides here: the extension being switched off is not an
   // answer, so it comes back with the bar if it is switched on again.
   function disable(){
-    enabled = false; stopPolling(); stopPlacing(); removeWidgets(); hideSetup();
+    enabled = false; stopPolling(); stopPlacing(); removeWidgets(); hideSetup(); hideToast();
     CUBS.unwatch();
   }
 
@@ -1149,6 +1195,7 @@
     // The service worker worked out a new forecast from the history.
     if (changes[INSIGHTS_KEY]){ insights = insightsOf(changes[INSIGHTS_KEY].newValue); if (enabled) render(); }
     if (changes[PREFS_KEY]){ prefs = Object.assign({}, DEFAULT_PREFS, changes[PREFS_KEY].newValue || {}); if (enabled) render(); }
+    if (changes[NOTICE_KEY] && changes[NOTICE_KEY].newValue) showNotice(changes[NOTICE_KEY].newValue);
     if (changes[DESIGN_KEY]) { switchDesign(changes[DESIGN_KEY].newValue === "2" ? "2" : "1"); }
     // Answered somewhere else (the install tab, or another claude.ai tab): close
     // our box. Our own answer is skipped, or picking a design would shut the box
@@ -1179,6 +1226,7 @@
     startPlacing();
     render();
     refresh(FOCUS_MAX_AGE_MS);
+    checkNotice();          // an alert that landed while nobody was looking
   });
 
   function insightsOf(v){ return v && v.limits && typeof v.limits === "object" ? v.limits : {}; }
@@ -1195,6 +1243,6 @@
     enabled = o[TOGGLE_KEY] !== false;
     setupPending = !(o[SETUP_KEY] && o[SETUP_KEY].done);
     watchTheme();
-    if (enabled) enable();
+    if (enabled){ enable(); checkNotice(); }
   });
 })();

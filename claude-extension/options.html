@@ -89,6 +89,49 @@
       <section class="o-card">
         <div class="o-row">
           <div class="o-row-text">
+            <div class="o-row-label">Alerts</div>
+            <div class="o-row-sub">A heads-up before a limit runs out, and when it resets. Off until you turn it on.</div>
+          </div>
+          <label class="p-switch" title="Alerts">
+            <input type="checkbox" id="alerts-on" />
+            <span class="p-slider"></span>
+          </label>
+        </div>
+
+        <div id="alerts-opts" class="o-suboption">
+          <div class="o-row-sub o-suboption-label">Tell me when a limit reaches</div>
+          <div class="o-chips" id="alerts-at">
+            <label class="o-chip"><input type="checkbox" value="50" /><span>50%</span></label>
+            <label class="o-chip"><input type="checkbox" value="75" /><span>75%</span></label>
+            <label class="o-chip"><input type="checkbox" value="80" /><span>80%</span></label>
+            <label class="o-chip"><input type="checkbox" value="90" /><span>90%</span></label>
+            <label class="o-chip"><input type="checkbox" value="95" /><span>95%</span></label>
+            <label class="o-chip"><input type="checkbox" value="100" /><span>100%</span></label>
+          </div>
+          <div class="o-checks">
+            <label class="o-radio"><input type="checkbox" id="alerts-resets" /><span>When a limit I got close to resets</span></label>
+            <label class="o-radio"><input type="checkbox" id="alerts-credits" /><span>When extra usage starts billing, nears its cap, or reaches it</span></label>
+          </div>
+          <div class="o-row o-row-inner">
+            <div class="o-row-text">
+              <div class="o-row-label">Desktop notifications</div>
+              <div class="o-row-sub" id="desktop-sub">When off, alerts show on your open claude.ai tabs. Turning this on asks your browser for permission.</div>
+            </div>
+            <label class="p-switch" title="Desktop notifications">
+              <input type="checkbox" id="alerts-desktop" />
+              <span class="p-slider"></span>
+            </label>
+          </div>
+          <div class="o-test">
+            <button id="alerts-test" class="p-btn" type="button">Send a test alert</button>
+            <span id="alerts-test-status" class="o-row-sub" role="status"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="o-card">
+        <div class="o-row">
+          <div class="o-row-text">
             <div class="o-row-label">Account</div>
             <div class="o-row-sub"><span id="acct">Loading…</span></div>
           </div>
@@ -120,6 +163,7 @@
 
     <script src="usage.js"></script>
     <script src="session.js"></script>
+    <script src="alerts.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

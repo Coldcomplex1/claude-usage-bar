@@ -14,7 +14,7 @@
 //
 // The content script reacts to the cub_enabled storage change to show/hide the bar.
 
-importScripts("usage.js", "session.js", "history.js");   // classic service worker: CUB, CUBS, CUBH
+importScripts("usage.js", "session.js", "history.js", "alerts.js");   // classic service worker: CUB, CUBS, CUBH, CUBA
 
 var TOGGLE_KEY = "cub_enabled";
 var LAST_KEY = "cub_last";
@@ -134,10 +134,13 @@ chrome.commands.onCommand.addListener(function (command) {
 // fetched it, so it is the one writer of the history (history.js): readings
 // are recorded one at a time, in the order they arrive, on a single chain.
 // A failure is logged and dropped; the next reading starts a fresh link.
+// The same chain then decides whether the reading is worth an alert.
 var pipeline = Promise.resolve();
 function onReading(result){
   pipeline = pipeline.then(function (){ return CUBH.record(result); })
-    .catch(function (e){ try { console.debug("[Claude Usage Bar] history", e); } catch (e2) {} });
+    .catch(function (e){ try { console.debug("[Claude Usage Bar] history", e); } catch (e2) {} })
+    .then(function (){ return checkAlerts(result); })
+    .catch(function (e){ try { console.debug("[Claude Usage Bar] alerts", e); } catch (e2) {} });
   return pipeline;
 }
 
@@ -147,6 +150,101 @@ chrome.storage.onChanged.addListener(function (changes, area){
   if (area !== "local") return;
   if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY] || changes[FREE_KEY]) refreshBadge();
   if (changes[LAST_KEY] && changes[LAST_KEY].newValue) onReading(changes[LAST_KEY].newValue);
+  // Alerts switched off: the pending reset reminders go with them.
+  if (changes[CUBA.SETTINGS_KEY] && !CUBA.settingsOf(changes[CUBA.SETTINGS_KEY].newValue).on) clearResetAlarms();
+});
+
+// ---- Alerts --------------------------------------------------------------------
+// Off until the user turns them on. Delivered as a desktop notification when
+// the user allowed those (the permission is optional and asked for only when
+// they switch it on in Settings), otherwise as cub_notice, which every visible
+// claude.ai tab shows as a toast.
+
+function hasNotifications(){
+  return new Promise(function (r){
+    try { chrome.permissions.contains({ permissions: ["notifications"] }, function (ok){ r(!!ok && !!chrome.notifications); }); }
+    catch (e){ r(false); }
+  });
+}
+
+async function deliver(alerts){
+  var note = CUBA.combine(alerts);
+  if (!note) return null;
+  var settings = CUBA.settingsOf((await sget([CUBA.SETTINGS_KEY]))[CUBA.SETTINGS_KEY]);
+  if (settings.desktop && await hasNotifications()){
+    wireNotificationClicks();
+    chrome.notifications.create("cub-" + Date.now(), {
+      type: "basic", iconUrl: "icons/icon128.png", title: note.title, message: note.message, priority: 1
+    });
+    return "desktop";
+  }
+  await sset({ [CUBA.NOTICE_KEY]: { id: Date.now() + "-" + Math.random().toString(36).slice(2), title: note.title,
+                                    message: note.message, at: Date.now() } });
+  return "page";
+}
+
+async function checkAlerts(result){
+  var st = await sget([CUBA.SETTINGS_KEY, CUBA.STATE_KEY]);
+  var settings = CUBA.settingsOf(st[CUBA.SETTINGS_KEY]);
+  if (!settings.on) return;
+  var out = CUBA.evaluate(result, settings, st[CUBA.STATE_KEY], Date.now());
+  if (JSON.stringify(out.state) !== JSON.stringify(st[CUBA.STATE_KEY] || {})) await sset({ [CUBA.STATE_KEY]: out.state });
+  out.resets.forEach(scheduleReset);
+  await deliver(out.alerts);
+}
+
+// One alarm per limit, at the moment it resets. Only (re)created when missing
+// or moved, since this runs on every reading.
+function scheduleReset(r){
+  var name = CUBA.RESET_ALARM + r.id;
+  chrome.alarms.get(name, function (a){
+    if (a && Math.abs(a.scheduledTime - r.when) < 60000) return;
+    chrome.alarms.create(name, { when: r.when + 15000 });
+  });
+}
+
+function clearResetAlarms(){
+  chrome.alarms.getAll(function (all){
+    (all || []).forEach(function (a){ if (a.name.indexOf(CUBA.RESET_ALARM) === 0) chrome.alarms.clear(a.name); });
+  });
+}
+
+async function onResetAlarm(alarm){
+  var id = alarm.name.slice(CUBA.RESET_ALARM.length);
+  var st = await sget([CUBA.SETTINGS_KEY, CUBA.STATE_KEY]);
+  var out = CUBA.onReset(id, alarm.scheduledTime, st[CUBA.SETTINGS_KEY], st[CUBA.STATE_KEY], Date.now());
+  if (!out.alert) return;
+  await sset({ [CUBA.STATE_KEY]: out.state });
+  await deliver([out.alert]);
+}
+
+// A click on a desktop notification brings claude.ai forward, or opens it.
+var notificationClicksWired = false;
+function wireNotificationClicks(){
+  if (notificationClicksWired || !chrome.notifications || !chrome.notifications.onClicked) return;
+  notificationClicksWired = true;
+  chrome.notifications.onClicked.addListener(function (nid){
+    if (nid.indexOf("cub-") !== 0) return;
+    chrome.notifications.clear(nid);
+    claudeTabs().then(function (tabs){
+      if (tabs.length){
+        chrome.tabs.update(tabs[0].id, { active: true });
+        if (tabs[0].windowId != null) chrome.windows.update(tabs[0].windowId, { focused: true });
+      } else chrome.tabs.create({ url: "https://claude.ai/" });
+    });
+  });
+}
+// Registered at start-up whenever the permission is already there, so a click
+// on a notification still lands after the worker has been put to sleep.
+wireNotificationClicks();
+if (chrome.permissions && chrome.permissions.onAdded) chrome.permissions.onAdded.addListener(wireNotificationClicks);
+
+// Settings' "Send a test alert".
+chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse){
+  if (!msg || msg.type !== "cub:test-alert") return;
+  deliver([{ title: "Claude Usage Bar alert", message: "This is how an alert will look. Session at 80% \u00b7 resets in 1h 12m." }])
+    .then(function (via){ sendResponse({ ok: true, via: via }); }, function (){ sendResponse({ ok: false }); });
+  return true;
 });
 
 // ---- Background refresh --------------------------------------------------
@@ -258,7 +356,10 @@ async function doRefresh(reason){
   } finally { refreshing = false; }
 }
 
-chrome.alarms.onAlarm.addListener(function (a){ if (a.name === ALARM) doRefresh("alarm"); });
+chrome.alarms.onAlarm.addListener(function (a){
+  if (a.name === ALARM) doRefresh("alarm");
+  else if (a.name.indexOf(CUBA.RESET_ALARM) === 0) onResetAlarm(a);
+});
 
 // ---- First run ------------------------------------------------------------
 

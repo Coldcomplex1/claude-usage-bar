@@ -46,6 +46,76 @@ function saveBadge(patch){
   });
 }
 
+// ---- Alerts --------------------------------------------------------------
+// Off until switched on. The thresholds, the reset and extra-usage alerts and
+// the desktop switch are greyed out (but kept) while alerts are off.
+function applyAlertsDisabled(on){
+  document.getElementById("alerts-opts").classList.toggle("o-disabled", !on);
+}
+function loadAlerts(){
+  chrome.storage.local.get([CUBA.SETTINGS_KEY], function(o){
+    var a = CUBA.settingsOf(o[CUBA.SETTINGS_KEY]);
+    document.getElementById("alerts-on").checked = a.on;
+    document.querySelectorAll("#alerts-at input").forEach(function(cb){ cb.checked = a.at.indexOf(Number(cb.value)) !== -1; });
+    document.getElementById("alerts-resets").checked = a.resets;
+    document.getElementById("alerts-credits").checked = a.credits;
+    applyAlertsDisabled(a.on);
+    // The switch only reads as on when the browser actually allows it: the
+    // permission can be taken away from chrome://extensions behind our back.
+    chrome.permissions.contains({ permissions: ["notifications"] }, function(granted){
+      document.getElementById("alerts-desktop").checked = a.desktop && !!granted;
+    });
+  });
+}
+function saveAlerts(patch){
+  chrome.storage.local.get([CUBA.SETTINGS_KEY], function(o){
+    var a = Object.assign({}, CUBA.settingsOf(o[CUBA.SETTINGS_KEY]), patch);
+    chrome.storage.local.set({ [CUBA.SETTINGS_KEY]: a });
+  });
+}
+function wireAlerts(){
+  document.getElementById("alerts-on").addEventListener("change", function(e){
+    applyAlertsDisabled(e.target.checked);
+    saveAlerts({ on: e.target.checked });
+  });
+  document.querySelectorAll("#alerts-at input").forEach(function(cb){
+    cb.addEventListener("change", function(){
+      var at = [];
+      document.querySelectorAll("#alerts-at input").forEach(function(x){ if (x.checked) at.push(Number(x.value)); });
+      saveAlerts({ at: at });
+    });
+  });
+  document.getElementById("alerts-resets").addEventListener("change", function(e){ saveAlerts({ resets: e.target.checked }); });
+  document.getElementById("alerts-credits").addEventListener("change", function(e){ saveAlerts({ credits: e.target.checked }); });
+  // Asked for at the moment it is wanted, from this click, and not at install:
+  // an update adding a permission with a warning would switch the extension
+  // off for everyone until they accepted it.
+  document.getElementById("alerts-desktop").addEventListener("change", function(e){
+    var box = e.target, sub = document.getElementById("desktop-sub");
+    if (box.checked){
+      chrome.permissions.request({ permissions: ["notifications"] }, function(granted){
+        if (!granted){
+          box.checked = false;
+          sub.textContent = "Your browser didn't allow notifications, so alerts stay on your claude.ai tabs.";
+          return;
+        }
+        saveAlerts({ desktop: true });
+      });
+    } else {
+      saveAlerts({ desktop: false });
+      chrome.permissions.remove({ permissions: ["notifications"] });
+    }
+  });
+  document.getElementById("alerts-test").addEventListener("click", function(){
+    var status = document.getElementById("alerts-test-status");
+    status.textContent = "Sending\u2026";
+    chrome.runtime.sendMessage({ type: "cub:test-alert" }, function(r){
+      if (chrome.runtime.lastError || !r || !r.ok){ status.textContent = "Couldn't send one just now."; return; }
+      status.textContent = r.via === "desktop" ? "Sent as a desktop notification." : "Sent: it shows on your open claude.ai tabs.";
+    });
+  });
+}
+
 // ---- Account -------------------------------------------------------------
 function setAcct(name){ document.getElementById("acct").textContent = name || "(unnamed)"; }
 
@@ -151,6 +221,7 @@ document.addEventListener("DOMContentLoaded", function(){
   loadToggle();
   loadDesign();
   loadBadge();
+  loadAlerts(); wireAlerts();
   loadHotkey();
 
   chrome.storage.local.get([LAST_KEY], function(o){

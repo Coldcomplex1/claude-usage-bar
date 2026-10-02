@@ -36,6 +36,17 @@ body {
 .o-radio { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 .o-radio input { accent-color: #d85a30; width: 15px; height: 15px; cursor: pointer; }
 
+/* Alert thresholds: toggle chips, several at once. */
+.o-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.o-chip { position: relative; cursor: pointer; }
+.o-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+.o-chip span { display: inline-block; font-size: 12px; padding: 4px 11px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.14); font-variant-numeric: tabular-nums; }
+.o-chip input:checked + span { border-color: #d85a30; background: rgba(216,90,48,0.10); color: #b4441f; font-weight: 600; }
+.o-chip input:focus-visible + span { outline: 2px solid #d85a30; outline-offset: 2px; }
+.o-checks { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.o-row-inner { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.07); }
+.o-test { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+
 /* Design chooser: two illustrated option cards. The selected card gets the
    orange accent already used by the toggle and radios. */
 .o-designs { display: flex; gap: 12px; margin-top: 12px; }
@@ -73,6 +84,8 @@ body {
 
 /* Account scan list (shared look with the popup's previous scan UI). */
 .p-scan { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.07); display: flex; flex-direction: column; gap: 6px; }
+/* display:flex outranks the UA sheet's [hidden], which left an empty divider under the account. */
+.p-scan[hidden] { display: none; }
 .p-scan-hint { font-size: 12px; opacity: 0.7; margin-bottom: 2px; }
 .p-empty { opacity: 0.6; font-size: 12px; padding: 4px 0; }
 .p-org { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.1); border-radius: 8px; }
@@ -96,6 +109,9 @@ body {
   .o-design:hover .o-design-card { border-color: rgba(255,255,255,0.26); }
   .o-design input:checked + .o-design-card { border-color: #d85a30; background: rgba(216,90,48,0.16); }
   .o-design-illus { background: #232320; }
+  .o-chip span { border-color: rgba(255,255,255,0.16); }
+  .o-chip input:checked + span { background: rgba(216,90,48,0.18); color: #f0a07f; }
+  .o-row-inner { border-top-color: rgba(255,255,255,0.10); }
   .o-illus-composer { background: #3a3a37; border-color: rgba(255,255,255,0.14); }
   .o-illus-2 .o-illus-plus { border-color: rgba(255,255,255,0.4); }
   .o-illus-2 .o-illus-chip { background: rgba(255,255,255,0.18); }

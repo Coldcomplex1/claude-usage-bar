@@ -244,6 +244,28 @@ function paint(data){
   else render(data);
 }
 
+// Alerts, from here in one click. Desktop notifications need the browser's
+// permission, which is asked for in Settings; here it is the claude.ai toast.
+function renderAlerts(a){
+  var state = document.getElementById("alerts-state"), btn = document.getElementById("alerts-toggle");
+  state.textContent = a.on ? (a.at.length ? "Alerts on at " + a.at.map(function(n){ return n + "%"; }).join(", ") : "Alerts on")
+                           : "Alerts are off";
+  btn.textContent = a.on ? "Turn off" : "Turn on";
+}
+function loadAlerts(){
+  chrome.storage.local.get([CUBA.SETTINGS_KEY], function(o){ renderAlerts(CUBA.settingsOf(o[CUBA.SETTINGS_KEY])); });
+}
+function wireAlerts(){
+  document.getElementById("alerts-toggle").addEventListener("click", function(){
+    chrome.storage.local.get([CUBA.SETTINGS_KEY], function(o){
+      var a = CUBA.settingsOf(o[CUBA.SETTINGS_KEY]);
+      a.on = !a.on;
+      chrome.storage.local.set({ [CUBA.SETTINGS_KEY]: a });
+      renderAlerts(a);
+    });
+  });
+}
+
 function loadShow(){
   chrome.storage.local.get([SHOW_KEY], function(o){
     var show = Object.assign({}, DEFAULT_SHOW, o[SHOW_KEY] || {});
@@ -275,6 +297,7 @@ document.addEventListener("DOMContentLoaded", function(){
     loadSpark();
   });
   loadShow(); wireShow();
+  loadAlerts(); wireAlerts();
   statusTimer = setInterval(showAge, 15000);
   // A tab or the alarm refreshing while the popup is open should show up here too.
   chrome.storage.onChanged.addListener(function(changes, area){
