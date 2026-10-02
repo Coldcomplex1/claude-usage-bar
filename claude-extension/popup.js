@@ -14,6 +14,8 @@ var shown = null;          // what is currently painted, for the "updated" line
 var statusTimer = null;
 var insights = {};         // limit id -> { rate, fullAt, projected, resetAt }
 var prefs = {};
+var spark = {};            // limit id -> the last day's readings, for the sparklines
+var DAY_MS = 24 * 3600e3;
 
 function plural(n, w){ return n + " " + w + (n === 1 ? "" : "s"); }
 
@@ -59,12 +61,34 @@ function outlook(l){
   return bits.length ? el("div", "p-fc", bits.join(" · ")) : null;
 }
 
-function head(label, sub, value){
+function head(label, sub, value, extra){
   var h = el("div", "p-row-head");
   h.appendChild(el("span", "p-label", label));
   if (sub) h.appendChild(el("span", "p-sub", sub));
+  if (extra) h.appendChild(extra);
   h.appendChild(el("span", "p-val", value));
   return h;
+}
+
+// The last day of this limit, drawn small beside its value.
+function sparkFor(id){
+  var pts = spark[id];
+  if (!pts || pts.length < 2) return null;
+  var now = Date.now();
+  return CUBC.sparkline(pts, { from: now - DAY_MS, to: now, width: 56, height: 16 });
+}
+
+// Read the last day of history once, then whenever the worker records more.
+function loadSpark(){
+  var now = Date.now();
+  CUBH.range(now - DAY_MS, now).then(function(samples){
+    var out = {};
+    samples.forEach(function(s){
+      Object.keys(s.p).forEach(function(id){ (out[id] || (out[id] = [])).push({ t: s.t, v: s.p[id] }); });
+    });
+    spark = out;
+    if (shown && shown.reported !== false) render(shown);
+  });
 }
 
 // The free-plan row: a count and a countdown, with a line saying why there is no
@@ -99,7 +123,7 @@ function limitRow(l){
   row.setAttribute("aria-valuetext", aria);
   row.setAttribute("aria-label", aria);
   if (l.tip) row.title = l.tip;
-  row.appendChild(head(l.label, l.sub, pct == null ? "–" : pct + "%"));
+  row.appendChild(head(l.label, l.sub, pct == null ? "–" : pct + "%", sparkFor(l.id)));
   row.appendChild(track(pct, pct == null ? null : paceAt(l)));
   if (left) row.appendChild(el("div", "p-reset", "resets in " + left + (at ? " · " + at : "")));
   var o = pct == null ? null : outlook(l);
@@ -248,6 +272,7 @@ document.addEventListener("DOMContentLoaded", function(){
     prefs = o[PREFS_KEY] || {};
     if (o[LAST_KEY]){ paint(o[LAST_KEY]); showAge(); }   // paint the cache first, then decide
     refresh(false);
+    loadSpark();
   });
   loadShow(); wireShow();
   statusTimer = setInterval(showAge, 15000);
@@ -255,6 +280,7 @@ document.addEventListener("DOMContentLoaded", function(){
   chrome.storage.onChanged.addListener(function(changes, area){
     if (area !== "local") return;
     if (changes[LAST_KEY] && changes[LAST_KEY].newValue){ paint(changes[LAST_KEY].newValue); showAge(); }
+    if (changes[CUBH.INDEX_KEY]) loadSpark();
     if (changes[INSIGHTS_KEY] || changes[PREFS_KEY]){
       if (changes[INSIGHTS_KEY]) insights = insightsOf(changes[INSIGHTS_KEY].newValue);
       if (changes[PREFS_KEY]) prefs = changes[PREFS_KEY].newValue || {};
@@ -266,5 +292,8 @@ document.addEventListener("DOMContentLoaded", function(){
   document.getElementById("refresh").addEventListener("click", function(){ refresh(true); });
   document.getElementById("settings").addEventListener("click", function(){
     chrome.runtime.openOptionsPage();
+  });
+  document.getElementById("dashboard").addEventListener("click", function(){
+    chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
   });
 });

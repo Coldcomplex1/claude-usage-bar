@@ -53,6 +53,17 @@ body {
 .p-btn:disabled { opacity: 0.55; cursor: default; }
 .p-btn:focus-visible { outline: 2px solid #d85a30; outline-offset: 1px; }
 
+/* The last day of a limit, between its name and its value. */
+.p-row-head .cubc-spark { margin-left: auto; align-self: center; }
+.p-row-head .cubc-spark + .p-val { margin-left: 8px; }
+.cubc-spark-line { fill: none; stroke: #9a9992; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.cubc-spark-dot { fill: #d85a30; }
+
+.p-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.p-link { border: 0; background: none; padding: 0; font-size: 11.5px; color: #b4441f; cursor: pointer; text-decoration: none; }
+.p-link:hover { text-decoration: underline; }
+.p-link:focus-visible { outline: 2px solid #d85a30; outline-offset: 2px; }
+
 @media (prefers-reduced-motion: reduce) { .p-fill { transition: none; } }
 
 @media (prefers-color-scheme: dark) {
@@ -64,5 +75,6 @@ body {
   .p-tier, .p-chip-live { background: rgba(216,90,48,0.22); color: #f0a07f; }
   .p-chip-cap { background: rgba(226,86,77,0.22); color: #f2a19b; }
   .p-chip-off { background: rgba(255,255,255,0.1); }
-  .p-note-live, .p-fc-warn { color: #f0a07f; }
+  .p-note-live, .p-fc-warn, .p-link { color: #f0a07f; }
+  .cubc-spark-line { stroke: #8f8e88; }
 }
