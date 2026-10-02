@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Claude Usage Bar</title>
-<meta name="description" content="A small Chrome extension that shows your Claude.ai usage, your 5 hour session and your weekly limits, in a slim bar under the chat box. On the free plan it counts your messages in the 5 hour window instead. No sign-in, no tokens, nothing leaves your browser." />
+<meta name="description" content="A small Chrome extension that shows your Claude.ai usage, your 5 hour session, your weekly and per-model limits and any extra usage you spend, in a slim bar under the chat box, with history, forecasts and optional alerts. On the free plan it counts your messages in the 5 hour window instead. No sign-in, no tokens, nothing leaves your browser." />
 <meta property="og:title" content="Claude Usage Bar" />
 <meta property="og:description" content="See how much Claude you have left, right under the chat box." />
 <meta property="og:type" content="website" />
@@ -513,9 +513,9 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
       <p class="eyebrow">Free Chrome extension</p>
       <h1>See how much Claude you have left.</h1>
       <p class="lede">
-        Claude Usage Bar puts your 5 hour session and your weekly limits in a slim bar
-        under the chat box. You can see where you stand before you run out, instead of
-        finding out halfway through a thought.
+        Claude Usage Bar puts your 5 hour session, your weekly limits and any extra usage
+        you spend in a slim bar under the chat box. You can see where you stand, and where
+        you are heading, before you run out, instead of finding out halfway through a thought.
       </p>
       <div class="hero-cta">
         <a class="btn btn-primary" href="https://chromewebstore.google.com/detail/claude-usage-bar-track-yo/jlomdmgiaoldnhjfhehgjjkgnlighmeo">Add to Chrome</a>
@@ -779,6 +779,36 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
           <h3>More than one account</h3>
           <p>If you belong to several organizations, the extension finds the one with your real usage, and you can override the choice from Settings.</p>
         </div>
+        <div class="feat">
+          <div class="feat-ico"><span class="feat-data">$12.40 of $50</span></div>
+          <h3>Extra usage, in dollars</h3>
+          <p>If you pay for extra usage, the bar shows what you have spent against your monthly cap, and marks the moment a full limit starts billing it.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-ico"><span class="feat-data">Fable 7d &middot; 81%</span></div>
+          <h3>Every limit, by name</h3>
+          <p>A per-model weekly cap or a separate Cowork allowance gets a row of its own, under the name Claude gives it. A new one shows up without an update.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-ico"><span class="feat-data">full in ~40m</span></div>
+          <h3>Where it is heading</h3>
+          <p>A tick on each bar marks where an even pace would put you, and a forecast appears when you are on course to run out before the reset.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-ico"><span class="feat-data">Session at 80%</span></div>
+          <h3>A heads-up, if you want one</h3>
+          <p>Alerts at the levels you pick, when a limit you got close to resets, and when extra usage kicks in. Off until you turn them on.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-ico"><span class="feat-data">24h &middot; 7d &middot; 30d</span></div>
+          <h3>A dashboard of your own</h3>
+          <p>Every limit over time, how often you ran out, your busiest hours and what you spent, kept on your device for sixty days and exportable as CSV.</p>
+        </div>
+        <div class="feat">
+          <div class="feat-ico"><span class="feat-badge">2h</span></div>
+          <h3>A badge that counts down</h3>
+          <p>When the limit on the badge is full, it shows how long until it refills. Right-click the icon to refresh, or to open the dashboard.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -803,13 +833,13 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
         <div class="step">
           <div class="step-tag">storage.local</div>
           <h3>It keeps everything on your machine</h3>
-          <p>Your preferences and the last numbers it saw live in your browser's local storage. There is no account, no server on our side, and nothing to sync.</p>
+          <p>Your preferences, the last numbers it saw and a sixty-day history for the forecasts and the dashboard live in your browser's local storage. There is no account, no server on our side, and nothing to sync.</p>
         </div>
       </div>
       <div class="endpoints">
         <div><b>GET</b> /api/organizations</div>
         <div><b>GET</b> /api/organizations/{id}/usage</div>
-        <div style="margin-top:12px;opacity:.75">five_hour &nbsp; seven_day &nbsp; seven_day_opus</div>
+        <div style="margin-top:12px;opacity:.75">limits &nbsp; five_hour &nbsp; seven_day &nbsp; extra_usage &nbsp; spend</div>
       </div>
     </div>
   </section>
@@ -887,6 +917,18 @@ footer{ border-top:1px solid var(--line); background:var(--bg-2); padding:34px 0
         <details>
           <summary>Can this break?</summary>
           <p>Yes, and it is worth saying plainly. The usage endpoints are internal to Claude and undocumented, so Anthropic can change them at any time without warning. If that happens the bar goes quiet until the extension is updated.</p>
+        </details>
+        <details>
+          <summary>Does it show extra usage, or credits?</summary>
+          <p>Yes. If extra usage is switched on for your account, the bar shows what you have spent against your monthly cap, and a dot marks the moment a full limit means you are paying at API rates. The popup and the dashboard also show your balance and auto-reload when Claude reports them.</p>
+        </details>
+        <details>
+          <summary>How does the forecast work?</summary>
+          <p>It looks at how fast a limit has been filling lately, the last hour for the session and the last day for a weekly limit, and works out when it would run out at that rate. It is an estimate, and the bar only gives it a line when you are on course to run out before the limit resets.</p>
+        </details>
+        <details>
+          <summary>Where does the history live?</summary>
+          <p>In your browser, for sixty days, and nowhere else. Settings can switch it off or clear it, and the dashboard exports it as CSV or JSON.</p>
         </details>
         <details>
           <summary>Can I change the keyboard shortcut?</summary>
