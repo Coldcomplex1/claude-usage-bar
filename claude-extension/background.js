@@ -79,10 +79,12 @@ function renderBadge(enabled, badge, data, free){
 
 // The icon's hover text carries the full readout, so the whole thing can be read
 // without opening anything. The badge only has room for one number; this has room
-// for all three windows, their countdowns, and how old the reading is.
+// for every limit, their countdowns, the extra-usage spend, and how old the
+// reading is.
 function titleFor(data, free){
   var base = "Claude Usage Bar";
   if (!data) return base;
+  if (data.tier) base += " \u00b7 " + data.tier;
   if (isFree(data)){
     var left = free && free.resetAt ? CUB.fmtReset(free.resetAt) : "";
     var n = (free && free.count) || 0;
@@ -94,13 +96,17 @@ function titleFor(data, free){
       (data.fetchedAt ? "\nChecked " + CUB.fmtAgo(data.fetchedAt) : "");
   }
   var lines = [];
-  [["Session (5h)", data.session], ["All models (7d)", data.allModels], ["Opus (7d)", data.opus]]
-    .forEach(function (pair){
-      var pct = winPct(pair[1]);
-      if (pct == null) return;
-      var left = pct > 0 ? CUB.fmtReset(pair[1].resetAt) : "";
-      lines.push(pair[0] + ": " + pct + "%" + (left ? " · resets in " + left : ""));
-    });
+  CUB.limitsOf(data).forEach(function (l){
+    var pct = Math.round(l.pct);
+    var left = pct > 0 ? CUB.fmtReset(l.resetAt) : "";
+    lines.push(l.label + (l.sub ? " (" + l.sub + ")" : "") + ": " + pct + "%" + (left ? " \u00b7 resets in " + left : ""));
+  });
+  var c = data.credits;
+  if (c){
+    lines.push((c.label || "Extra usage") + ": " + CUB.fmtMoney(c.used, c.currency) +
+      (c.limit ? " of " + CUB.fmtMoney(c.limit, c.currency, true) : "") +
+      (!c.enabled ? " (off)" : c.capReached ? " (cap reached)" : CUB.creditsInUse(data) ? " (in use)" : ""));
+  }
   if (!lines.length) return base;
   if (data.fetchedAt) lines.push("Updated " + CUB.fmtAgo(data.fetchedAt));
   return base + "\n" + lines.join("\n");

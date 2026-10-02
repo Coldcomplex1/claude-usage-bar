@@ -9,6 +9,7 @@
     <div class="p-wrap">
       <div class="p-head">
         <span class="p-title">Claude Usage</span>
+        <span id="tier" class="p-tier" hidden></span>
       </div>
 
       <div id="rows" class="p-rows"><div class="p-empty">Loading…</div></div>
@@ -18,6 +19,8 @@
         <div class="p-chks">
           <label class="p-chk"><input type="checkbox" data-show="session" /><span>Session</span></label>
           <label class="p-chk"><input type="checkbox" data-show="allModels" /><span>All models</span></label>
+          <label class="p-chk" title="Per-model and per-surface limits, such as a Fable-only or Cowork weekly limit"><input type="checkbox" data-show="scoped" /><span>Per-model</span></label>
+          <label class="p-chk" title="Extra usage spend, when there is any"><input type="checkbox" data-show="credits" /><span>Extra usage</span></label>
         </div>
       </div>
 

@@ -57,9 +57,11 @@
   width: min(680px, 92vw); margin: 0; box-shadow: 0 6px 24px rgba(0,0,0,0.14);
 }
 
+/* The value column is wide enough for money as well as a percentage: the
+   extra-usage row reads "$12.40", and from $100 up drops the cents ("$408"). */
 #cub-bar .cub-seg {
   display: grid;
-  grid-template-columns: 100px minmax(30px, 1fr) 42px 58px;
+  grid-template-columns: 100px minmax(30px, 1fr) 48px 58px;
   column-gap: 12px;
   align-items: center;
 }
@@ -94,7 +96,15 @@
 /* .cub-track sets display:block, which outranks the UA sheet's [hidden] rule,
    so hiding it has to be said here. */
 #cub-bar .cub-track[hidden], #cub-bar .cub-note[hidden] { display: none; }
-#cub-bar .cub-reset { text-align: left; font-size: 10px; opacity: 0.55; white-space: nowrap; overflow: hidden; }
+#cub-bar .cub-reset { text-align: left; font-size: 10px; opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Extra usage being billed right now (a limit is full and extra usage is on):
+   a dot before the name, in the warning colour, so it reads on sight. */
+#cub-bar .cub-seg.cub-live .cub-name::before,
+#cub-inline .cub-i-seg.cub-live .cub-i-val::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--cub-mid); margin-right: 5px; vertical-align: 1px;
+}
 
 /* Design 2: compact inline widget that sits in the composer toolbar, between the
    "+" button and the model picker. Scoped and given explicit font/color so
@@ -122,6 +132,8 @@
 #cub-inline .cub-i-reset[hidden] { display: none; }
 #cub-inline .cub-i-reset::before { content: "\00b7"; margin-right: 6px; opacity: 0.7; }
 #cub-inline .cub-i-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A per-model limit's name after its ring ("Fable"), quieter than the value. */
+#cub-inline .cub-i-name { font-size: 10px; opacity: 0.6; margin-left: -3px; }
 
 #cub-inline .cub-i-bar {
   display: inline-block; width: 80px; height: 5px; border-radius: 999px;

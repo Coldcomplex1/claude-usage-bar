@@ -8,8 +8,12 @@
 //                   it never sits beside "Write a message...".
 // This file also carries the first-run setup box, for anyone who closed the
 // install tab without answering; see the section above fetchAndStore().
-// Session + All models are user-toggleable; Opus shows automatically only if the
-// account has it. Colors: blue < 30%, Claude orange 30-80%, red > 80%.
+//
+// The rows are whatever Claude reports: the session, the all-models week, any
+// per-model or per-surface limit the plan has (Fable, Sonnet, Cowork...), and
+// the extra-usage spend when there is news in it. Session, All models, the
+// scoped limits and the spend are each user-toggleable (cub_show). Colors: blue
+// < 30%, Claude orange 30-80%, red > 80%.
 // On a free account Claude reports no percentages at all (usage.js sets
 // `reported: false`), so the widget switches to the count readout instead of
 // showing a row of dashes forever: one row, the messages counted in the current
@@ -30,22 +34,24 @@
   var PLACE_MS = 800;              // placement heartbeat (cheap unless misplaced)
   var STALE_MS = 8 * 60 * 1000;    // past this the readout is dimmed as out of date
 
+  var DEFAULT_SHOW = { session: true, allModels: true, scoped: true, credits: true };
+
   var enabled = true, lastData = null, tickTimer = null, placeTimer = null;
   var inFlight = null;   // in-progress fetch, so the poll and the background alarm share one
-  var show = { session: true, allModels: true };
+  var show = Object.assign({}, DEFAULT_SHOW);
   var design = "1";
   var freeStore = null;   // raw cub_free_session; summarized per paint so the window rolls
 
-  // session/opus use a bar in Design 1; in Design 2 the weekly windows use a ring.
-  var SEGS = [
-    { key: "session",   label: "Session",    sub: "5h", opus: false, ring: false, tip: "Current rolling 5-hour session" },
-    { key: "allModels", label: "All models", sub: "7d", opus: false, ring: true,  tip: "Weekly usage, across all models" },
-    { key: "opus",      label: "Opus",       sub: "7d", opus: true,  ring: true,  tip: "Weekly Opus allowance" }
+  // Stand-ins drawn before the first reading lands, so the bar has its shape
+  // (and somewhere to put "!") from the moment the page loads.
+  var PLACEHOLDERS = [
+    { id: "session",   label: "Session",    sub: "5h", group: "session", tip: "Current rolling 5-hour session" },
+    { id: "allModels", label: "All models", sub: "7d", group: "weekly",  tip: "Weekly usage, across all models" }
   ];
 
-  function colorClass(p){ return p > 80 ? "cub-high" : p >= 30 ? "cub-mid" : "cub-low"; }
-  function pctOf(d){ return Math.max(0, Math.min(100, Math.round(d.pct))); }
-  function hasData(d){ return !!(d && d.available && d.pct != null); }
+  function colorClass(p){ return "cub-" + CUB.colorLevel(p); }
+  function pctOf(l){ return Math.max(0, Math.min(100, Math.round(l.pct))); }
+  function hasData(l){ return !!l && l.pct != null; }
 
   // Claude answered, with no usage in it: the free plan. Explicitly false, so a
   // reading from before this version (which has no `reported` field) still
@@ -84,37 +90,152 @@
     node.setAttribute("title", freeTip());
   }
 
+  function updatedLine(){
+    return lastData && lastData.fetchedAt ? "\nUpdated " + CUB.fmtAgo(lastData.fetchedAt) : "";
+  }
+
   // Hover text: the number, the countdown, the wall-clock time it lands on, what
   // the window means, and how old the reading is. Cheap enough to rebuild on
   // every paint, and it saves a trip to the popup.
-  function tipFor(s, d){
-    var t = s.label + " (" + s.sub + "): ";
-    if (!hasData(d)) t += "no data yet";
+  function tipFor(row){
+    var l = row.limit, d = row.def;
+    var t = d.label + (d.sub ? " (" + d.sub + ")" : "") + ": ";
+    if (!hasData(l)) t += "no data yet";
     else {
-      var pct = pctOf(d), left = pct > 0 ? CUB.fmtReset(d.resetAt) : "";
+      var pct = pctOf(l), left = pct > 0 ? CUB.fmtReset(l.resetAt) : "";
       t += pct + "% used";
-      if (left) t += ", resets in " + left + (CUB.fmtResetAt(d.resetAt) ? " (" + CUB.fmtResetAt(d.resetAt) + ")" : "");
+      if (left) t += ", resets in " + left + (CUB.fmtResetAt(l.resetAt) ? " (" + CUB.fmtResetAt(l.resetAt) + ")" : "");
     }
-    t += "\n" + s.tip;
-    if (lastData && lastData.fetchedAt) t += "\nUpdated " + CUB.fmtAgo(lastData.fetchedAt);
-    return t;
+    t += "\n" + d.tip;
+    // The compact widget shows one per-model limit; the rest are named here.
+    if (row.others && row.others.length > 1){
+      t += "\n" + row.others.map(function(o){ return o.label + " " + pctOf(o) + "%"; }).join(" · ");
+    }
+    return t + updatedLine();
   }
 
-  function ariaFor(s, d){
-    if (!hasData(d)) return s.label + ": no data";
-    var pct = pctOf(d), left = pct > 0 ? CUB.fmtReset(d.resetAt) : "";
-    return s.label + ": " + pct + "% used" + (left ? ", resets in " + left : "");
+  function ariaFor(row){
+    var l = row.limit, d = row.def;
+    if (!hasData(l)) return d.label + ": no data";
+    var pct = pctOf(l), left = pct > 0 ? CUB.fmtReset(l.resetAt) : "";
+    return d.label + ": " + pct + "% used" + (left ? ", resets in " + left : "");
   }
 
   // ARIA progress state, so a screen reader reads a meter rather than loose text.
-  function setProgress(node, d, s){
+  function setProgress(node, row){
     node.setAttribute("role", "progressbar");
-    if (!hasData(d)){ node.removeAttribute("aria-valuenow"); }
-    else node.setAttribute("aria-valuenow", String(pctOf(d)));
-    node.setAttribute("aria-valuetext", ariaFor(s, d));
-    node.setAttribute("aria-label", ariaFor(s, d));
-    node.setAttribute("title", tipFor(s, d));
+    node.setAttribute("aria-valuemin", "0");
+    node.setAttribute("aria-valuemax", "100");
+    if (!hasData(row.limit)){ node.removeAttribute("aria-valuenow"); }
+    else node.setAttribute("aria-valuenow", String(pctOf(row.limit)));
+    node.setAttribute("aria-valuetext", ariaFor(row));
+    node.setAttribute("aria-label", ariaFor(row));
+    node.setAttribute("title", tipFor(row));
   }
+
+  // ---- Extra usage ---------------------------------------------------------
+
+  // The spend, sized for a 48px column: cents while they matter, whole units
+  // from $100 up ("$12.40", "$408").
+  function barMoney(v, cur){ return CUB.fmtMoney(v >= 100 ? Math.round(v) : v, cur, v >= 100); }
+
+  // What the extra-usage row has to say, or null to leave it out. Only news
+  // earns it a place on the page: money spent, a full limit billing to it, or
+  // the cap reached. An account that merely has extra usage switched on, with
+  // nothing spent, keeps the bar as it was; the popup still shows it.
+  function creditsShown(){
+    var c = lastData && lastData.credits;
+    if (!c || show.credits === false) return null;
+    return (c.used > 0 || c.capReached || CUB.creditsInUse(lastData)) ? c : null;
+  }
+
+  function creditsTip(c){
+    var t = (c.label || "Extra usage") + ": " + CUB.fmtMoney(c.used, c.currency) +
+      (c.limit ? " of your " + CUB.fmtMoney(c.limit, c.currency, true) + " monthly cap (" + Math.round(c.pct) + "%)"
+               : " spent, no monthly cap set");
+    var more = [];
+    if (c.balance != null) more.push("Balance " + CUB.fmtMoney(c.balance, c.currency));
+    if (c.autoReload != null) more.push("auto-reload " + (c.autoReload ? "on" : "off"));
+    if (more.length) t += "\n" + more.join(" · ");
+    if (!c.enabled) t += "\nExtra usage is switched off.";
+    else if (c.capReached) t += "\nThe monthly cap is reached, so extra usage is paused.";
+    else if (CUB.creditsInUse(lastData)) t += "\nA limit is full, so what you send now is billed to extra usage at API rates.";
+    return t + updatedLine();
+  }
+
+  function setCreditsState(node, c){
+    var label = (c.label || "Extra usage") + ": " + CUB.fmtMoney(c.used, c.currency) +
+      (c.limit ? " of " + CUB.fmtMoney(c.limit, c.currency, true) : " spent");
+    if (c.limit){
+      node.setAttribute("role", "progressbar");
+      node.setAttribute("aria-valuemin", "0");
+      node.setAttribute("aria-valuemax", "100");
+      node.setAttribute("aria-valuenow", String(Math.round(c.pct)));
+    } else {
+      node.setAttribute("role", "status");
+      node.removeAttribute("aria-valuenow");
+    }
+    node.setAttribute("aria-valuetext", label);
+    node.setAttribute("aria-label", label);
+    node.setAttribute("title", creditsTip(c));
+    // A full limit is sending the bill here right now: say so on sight.
+    node.classList.toggle("cub-live", CUB.creditsInUse(lastData));
+  }
+
+  // ---- Which rows ----------------------------------------------------------
+
+  function shownLimit(l){
+    if (l.id === "session") return show.session !== false;
+    if (l.id === "allModels") return show.allModels !== false;
+    return show.scoped !== false;
+  }
+
+  // The rows to draw, in order, as { id, kind, limit, def, credits }; kind is
+  // "limit", "free" or "credits". `compact` (Design 2) keeps only the tightest
+  // of the per-model limits, so the toolbar widget stays one short line; the
+  // others go in its tooltip.
+  function rowsFor(compact){
+    if (!lastData){
+      return PLACEHOLDERS.filter(shownLimit).map(function(p){ return { id: p.id, kind: "limit", limit: null, def: p }; });
+    }
+    if (isFree()) return show.session !== false ? [{ id: "session", kind: "free" }] : [];
+    var limits = CUB.limitsOf(lastData).filter(shownLimit);
+    var others = null;
+    if (compact){
+      others = limits.filter(function(l){ return l.id !== "session" && l.id !== "allModels"; });
+      var top = CUB.tightest(others);
+      limits = limits.filter(function(l){ return l.id === "session" || l.id === "allModels" || l === top; });
+    }
+    var rows = limits.map(function(l){
+      var scoped = l.id !== "session" && l.id !== "allModels";
+      return { id: l.id, kind: "limit", limit: l, def: l, others: compact && scoped ? others : null };
+    });
+    var c = creditsShown();
+    if (c) rows.push({ id: "credits", kind: "credits", credits: c });
+    return rows;
+  }
+
+  // Make `root` hold exactly these rows, in this order, reusing the node each
+  // id already has. Rows come and go as Claude adds a limit or the user hides
+  // one; rebuilding the lot on every paint would restart the bars' transitions.
+  function syncRows(root, nodes, rows, build){
+    var want = {};
+    rows.forEach(function(r){ want[r.id] = true; });
+    Object.keys(nodes).forEach(function(id){
+      if (want[id]) return;
+      if (nodes[id].parentNode === root) root.removeChild(nodes[id]);
+      delete nodes[id];
+    });
+    var prev = null;
+    rows.forEach(function(r){
+      var node = nodes[r.id] || (nodes[r.id] = build(r));
+      var at = prev ? prev.nextSibling : root.firstChild;
+      if (node !== at) root.insertBefore(node, at);
+      prev = node;
+    });
+  }
+
+  function setText(node, text){ if (node && node.textContent !== text) node.textContent = text; }
 
   // Dimmed as out of date once the numbers are genuinely old, or sooner if the
   // last fetch failed outright: a single miss on a minute-old reading is not
@@ -198,29 +319,42 @@
   // Design 1: slim full-width bar under the composer.
   // ===================================================================
   var barEl = null;
+  var barRows = {};      // row id -> its node in the bar
   var barObserver = null, barObservedParent = null, barObservedComposer = null, barReinserts = [];
 
-  function segHtml(s){
-    return '<div class="cub-seg" role="progressbar" aria-valuemin="0" aria-valuemax="100" data-seg="'+s.key+'">'+
-      '<span class="cub-label"><span class="cub-name">'+s.label+'</span> <span class="cub-sub">'+s.sub+'</span></span>'+
+  // One row, four columns: label, bar (or a note standing in for it), value,
+  // and the reset countdown. Static markup only; the label is set as text,
+  // because limit names come from the API.
+  function buildSeg(row){
+    var node = document.createElement("div");
+    node.className = "cub-seg";
+    node.setAttribute("data-seg", row.id);
+    node.innerHTML =
+      '<span class="cub-label"><span class="cub-name"></span> <span class="cub-sub"></span></span>'+
       '<span class="cub-track"><span class="cub-fill"></span></span>'+
       '<span class="cub-note" hidden></span>'+
       '<span class="cub-val">–</span>'+
-      '<span class="cub-reset"></span>'+
-    '</div>';
+      '<span class="cub-reset"></span>';
+    return node;
   }
 
   function buildBar(){
     var bar = document.createElement("div");
     bar.id = "cub-bar"; bar.className = "cub-bar";
-    bar.innerHTML = SEGS.map(segHtml).join("");
+    barRows = {};
     return bar;
+  }
+
+  function setLabel(node, name, sub){
+    setText(node.querySelector(".cub-name"), name);
+    setText(node.querySelector(".cub-sub"), sub || "");
   }
 
   // The free readout, in the same four columns: the note stands in for the bar
   // (exactly one of the two is ever in the grid, so nothing shifts).
   function fillCountSeg(node){
     var f = freeNow();
+    setLabel(node, "Session", "5h");
     node.querySelector(".cub-track").hidden = true;
     var note = node.querySelector(".cub-note");
     note.hidden = false; note.textContent = FREE_NOTE;
@@ -229,42 +363,63 @@
     setCount(node);
   }
 
-  function fillSeg(node, d, s){
+  function fillSeg(node, row){
+    var l = row.limit;
+    setLabel(node, row.def.label, row.def.sub);
     var val = node.querySelector(".cub-val");
     var fill = node.querySelector(".cub-fill");
     var reset = node.querySelector(".cub-reset");
     node.querySelector(".cub-track").hidden = false;
     node.querySelector(".cub-note").hidden = true;
-    if (!hasData(d)){
+    if (!hasData(l)){
       val.textContent = "–"; fill.style.width = "0%"; fill.className = "cub-fill"; reset.textContent = "";
-      setProgress(node, d, s);
+      setProgress(node, row);
       return;
     }
-    var pct = pctOf(d);
+    var pct = pctOf(l);
     val.textContent = pct + "%";
     fill.style.width = pct + "%";
     fill.className = "cub-fill " + colorClass(pct);
-    reset.textContent = pct > 0 ? CUB.fmtReset(d.resetAt) : "";
-    setProgress(node, d, s);
+    reset.textContent = pct > 0 ? CUB.fmtReset(l.resetAt) : "";
+    setProgress(node, row);
+  }
+
+  // Extra usage, in the same four columns: against the cap when there is one
+  // ("$12.40" ... "of $50"), with a note in the bar's place when there is not.
+  function fillCreditsSeg(node, row){
+    var c = row.credits;
+    setLabel(node, c.label || "Extra usage", "");
+    var track = node.querySelector(".cub-track"), note = node.querySelector(".cub-note");
+    var fill = node.querySelector(".cub-fill"), reset = node.querySelector(".cub-reset");
+    node.querySelector(".cub-val").textContent = barMoney(c.used, c.currency);
+    if (c.limit){
+      track.hidden = false; note.hidden = true;
+      var pct = Math.round(c.pct || 0);
+      fill.style.width = pct + "%";
+      fill.className = "cub-fill " + colorClass(pct);
+      reset.textContent = c.capReached ? "cap hit" : "of " + CUB.fmtMoney(c.limit, c.currency, true);
+    } else {
+      track.hidden = true; note.hidden = false;
+      note.textContent = !c.enabled ? "switched off" : c.capReached ? "cap reached" : "no monthly cap";
+      reset.textContent = "";
+    }
+    setCreditsState(node, c);
   }
 
   function renderBar(){
     if (!barEl) return;
-    var free = isFree();
-    var any = false;
-    SEGS.forEach(function(s){
-      var node = barEl.querySelector('[data-seg="'+s.key+'"]');
-      if (!node) return;
-      var d = lastData ? lastData[s.key] : null;
-      // Free: only the session row, and only as a count. The weekly windows do
-      // not exist on that plan, so there is nothing honest to put in them.
-      var canShow = free ? (s.key === "session" && show.session !== false)
-                  : s.opus ? hasData(d) : (show[s.key] !== false);
-      node.hidden = !canShow;
-      if (canShow){ any = true; free ? fillCountSeg(node) : fillSeg(node, d, s); }
+    // Free: only the session row, and only as a count. The weekly windows do
+    // not exist on that plan, so there is nothing honest to put in them.
+    var rows = rowsFor(false);
+    syncRows(barEl, barRows, rows, buildSeg);
+    rows.forEach(function(r){
+      var node = barRows[r.id];
+      if (r.kind === "free") fillCountSeg(node);
+      else if (r.kind === "credits") fillCreditsSeg(node, r);
+      else fillSeg(node, r);
     });
     barEl.classList.toggle("cub-stale", isStale());
-    barEl.style.display = any ? "" : "none";
+    barEl.style.display = rows.length ? "" : "none";
   }
 
   // The chat input differs across surfaces (contenteditable on /new & chats, and
@@ -347,34 +502,54 @@
   // Design 2: compact widget inside the composer toolbar.
   // ===================================================================
   var inlineEl = null;
+  var inlineRows = {};   // row id -> its node in the widget
   var inlineObserver = null, inlineObservedParent = null, inlineObservedMode = "", inlineReinserts = [];
   var inlineResizeObserver = null, inlineLastMissLog = 0;
   var RING_C = 2 * Math.PI * 8; // circumference of the r=8 ring
 
-  function inlineSegHtml(s){
-    var indicator = s.ring
-      ? '<span class="cub-i-ring">'+
-          '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">'+
-            '<circle class="cub-i-ring-bg" cx="10" cy="10" r="8"></circle>'+
-            '<circle class="cub-i-ring-fill" cx="10" cy="10" r="8"></circle>'+
-          '</svg>'+
-        '</span>'
-      : '<span class="cub-i-bar"><span class="cub-i-fill"></span></span>';
+  var RING_HTML =
+    '<span class="cub-i-ring">'+
+      '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">'+
+        '<circle class="cub-i-ring-bg" cx="10" cy="10" r="8"></circle>'+
+        '<circle class="cub-i-ring-fill" cx="10" cy="10" r="8"></circle>'+
+      '</svg>'+
+    '</span>';
+
+  // The session reads value-then-bar; every other limit reads ring-then-value,
+  // and a per-model one adds its (short) name, since a bare ring could be any of
+  // them. The spend is a ring only when there is a cap to fill against.
+  function buildInlineSeg(row){
+    var el = document.createElement("span");
+    el.className = "cub-i-seg";
+    el.setAttribute("data-seg", row.id);
     var val = '<span class="cub-i-val">–</span>';
-    // Bar window reads value-then-bar; ring windows read ring-then-value.
-    var inner = s.ring ? (indicator + val) : (val + indicator);
-    return '<span class="cub-i-seg" role="progressbar" aria-valuemin="0" aria-valuemax="100" data-seg="'+s.key+'">'+
-      inner + '<span class="cub-i-reset" hidden></span></span>';
+    var html;
+    if (row.id === "session") html = val + '<span class="cub-i-bar"><span class="cub-i-fill"></span></span>';
+    else if (row.kind === "credits") html = RING_HTML + val;
+    else html = RING_HTML + val + (row.id !== "allModels" ? '<span class="cub-i-name"></span>' : "");
+    el.innerHTML = html + '<span class="cub-i-reset" hidden></span>';
+    return el;
   }
 
   function buildInline(){
     var el = document.createElement("div");
     el.id = "cub-inline"; el.className = "cub-inline";
-    el.innerHTML = SEGS.map(inlineSegHtml).join("");
+    inlineRows = {};
     return el;
   }
 
-  // Free, compact: "12 msg \u00b7 2h 41m". No indicator, because there is no
+  function setRing(node, pct, cc){
+    var rf = node.querySelector(".cub-i-ring-fill");
+    if (!rf) return;
+    rf.style.strokeDasharray = RING_C;
+    rf.style.strokeDashoffset = RING_C * (1 - (pct || 0) / 100);
+    rf.setAttribute("class", "cub-i-ring-fill" + (cc ? " " + cc : ""));
+  }
+
+  // "Claude Sonnet 5" would crowd the toolbar; the tooltip has the full name.
+  function shortName(s){ return s.length > 10 ? s.slice(0, 9) + "…" : s; }
+
+  // Free, compact: "12 msg · 2h 41m". No indicator, because there is no
   // percentage to indicate.
   function fillCountInlineSeg(node){
     var f = freeNow();
@@ -387,54 +562,59 @@
     setCount(node);
   }
 
-  function fillInlineSeg(node, d, s){
+  function fillInlineSeg(node, row){
+    var l = row.limit;
     var val = node.querySelector(".cub-i-val");
-    var ind0 = node.querySelector(".cub-i-ring") || node.querySelector(".cub-i-bar");
+    var ring = node.querySelector(".cub-i-ring");
+    var ind0 = ring || node.querySelector(".cub-i-bar");
     if (ind0) ind0.hidden = false;
     node.querySelector(".cub-i-reset").hidden = true;
-    if (!hasData(d)){
+    setText(node.querySelector(".cub-i-name"), shortName(row.def.label));
+    if (!hasData(l)){
       val.textContent = "–";
-      if (s.ring){
-        var rf0 = node.querySelector(".cub-i-ring-fill");
-        rf0.style.strokeDasharray = RING_C; rf0.style.strokeDashoffset = RING_C; rf0.setAttribute("class", "cub-i-ring-fill");
-      } else {
+      if (ring) setRing(node, 0, "");
+      else {
         var f0 = node.querySelector(".cub-i-fill");
         f0.style.width = "0%"; f0.className = "cub-i-fill";
       }
-      setProgress(node, d, s);
+      setProgress(node, row);
       return;
     }
-    var pct = pctOf(d);
+    var pct = pctOf(l);
     var cc = colorClass(pct);
     val.textContent = pct + "%";
-    if (s.ring){
-      var rf = node.querySelector(".cub-i-ring-fill");
-      rf.style.strokeDasharray = RING_C;
-      rf.style.strokeDashoffset = RING_C * (1 - pct / 100);
-      rf.setAttribute("class", "cub-i-ring-fill " + cc);
-    } else {
+    if (ring) setRing(node, pct, cc);
+    else {
       var f = node.querySelector(".cub-i-fill");
       f.style.width = pct + "%";
       f.className = "cub-i-fill " + cc;
     }
-    setProgress(node, d, s);
+    setProgress(node, row);
+  }
+
+  // "$12.40", inside a ring filled against the cap when there is one.
+  function fillInlineCredits(node, row){
+    var c = row.credits;
+    var ring = node.querySelector(".cub-i-ring");
+    ring.hidden = !c.limit;
+    if (c.limit){ var pct = Math.round(c.pct || 0); setRing(node, pct, colorClass(pct)); }
+    node.querySelector(".cub-i-val").textContent = barMoney(c.used, c.currency);
+    node.querySelector(".cub-i-reset").hidden = true;
+    setCreditsState(node, c);
   }
 
   function renderInline(){
     if (!inlineEl) return;
-    var free = isFree();
-    var any = false;
-    SEGS.forEach(function(s){
-      var node = inlineEl.querySelector('[data-seg="'+s.key+'"]');
-      if (!node) return;
-      var d = lastData ? lastData[s.key] : null;
-      var canShow = free ? (s.key === "session" && show.session !== false)
-                  : s.opus ? hasData(d) : (show[s.key] !== false);
-      node.hidden = !canShow;
-      if (canShow){ any = true; free ? fillCountInlineSeg(node) : fillInlineSeg(node, d, s); }
+    var rows = rowsFor(true);
+    syncRows(inlineEl, inlineRows, rows, buildInlineSeg);
+    rows.forEach(function(r){
+      var node = inlineRows[r.id];
+      if (r.kind === "free") fillCountInlineSeg(node);
+      else if (r.kind === "credits") fillInlineCredits(node, r);
+      else fillInlineSeg(node, r);
     });
     inlineEl.classList.toggle("cub-stale", isStale());
-    inlineEl.style.display = any ? "" : "none";
+    inlineEl.style.display = rows.length ? "" : "none";
   }
 
   // Find the toolbar's "+" button. We can't assume the toolbar lives in any one
@@ -898,7 +1078,7 @@
     // Another tab counted a send, or this one did: repaint from the store
     // rather than from whatever the counter handed back.
     if (changes[FREE_KEY]){ freeStore = changes[FREE_KEY].newValue || null; if (enabled) render(); }
-    if (changes[SHOW_KEY] && changes[SHOW_KEY].newValue){ show = Object.assign({ session:true, allModels:true }, changes[SHOW_KEY].newValue); if (enabled) render(); }
+    if (changes[SHOW_KEY] && changes[SHOW_KEY].newValue){ show = Object.assign({}, DEFAULT_SHOW, changes[SHOW_KEY].newValue); if (enabled) render(); }
     if (changes[DESIGN_KEY]) { switchDesign(changes[DESIGN_KEY].newValue === "2" ? "2" : "1"); }
     // Answered somewhere else (the install tab, or another claude.ai tab): close
     // our box. Our own answer is skipped, or picking a design would shut the box
@@ -934,7 +1114,7 @@
   chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, SHOW_KEY, DESIGN_KEY, SETUP_KEY, FREE_KEY], function (o){
     if (o[LAST_KEY]) lastData = o[LAST_KEY];
     if (o[FREE_KEY]) freeStore = o[FREE_KEY];
-    if (o[SHOW_KEY]) show = Object.assign(show, o[SHOW_KEY]);
+    if (o[SHOW_KEY]) show = Object.assign({}, DEFAULT_SHOW, o[SHOW_KEY]);
     // Design 1 stays the fallback while setup is pending, so the bar works from
     // the moment of install rather than waiting on an answer that may not come.
     design = o[DESIGN_KEY] === "2" ? "2" : "1";

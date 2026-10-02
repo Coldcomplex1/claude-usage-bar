@@ -78,7 +78,11 @@ async function refreshAccount(force){
   } catch (e){ /* keep the cached name we already showed */ }
 }
 
-function pctText(w){ return w && w.available ? Math.round(w.pct)+"%" : "–"; }
+// The short name a limit goes by in the picker: the window for the two every
+// plan has ("5h", "7d"), the model or surface name for the rest.
+function shortLimit(l){
+  return (l.id === "session" ? "5h" : l.id === "allModels" ? "7d" : l.label) + " " + Math.round(l.pct) + "%";
+}
 
 // What to say under an account name in the picker. An account Claude reports no
 // usage for is the free plan, not a broken pick, so it says so rather than
@@ -86,9 +90,10 @@ function pctText(w){ return w && w.available ? Math.round(w.pct)+"%" : "–"; }
 function orgDetail(r){
   if (!r.ok) return "error: " + (r.error || "?");
   var w = r.windows || {};
-  if (!(w.session && w.session.available) && !(w.allModels && w.allModels.available) &&
-      !(w.opus && w.opus.available)) return "no usage reported (free plan)";
-  return "5h " + pctText(w.session) + " · 7d " + pctText(w.allModels);
+  var parts = (w.limits || []).map(shortLimit);
+  if (w.credits) parts.push(CUB.fmtMoney(w.credits.used, w.credits.currency) + " extra usage");
+  if (!parts.length) return "no usage reported (free plan)";
+  return parts.join(" \u00b7 ");
 }
 
 function el(tag, cls, text){

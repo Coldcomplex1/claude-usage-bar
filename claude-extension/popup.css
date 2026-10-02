@@ -1,7 +1,7 @@
 /* popup.css: the slim popup. Usage, show-in-bar, footer (Settings + Refresh). */
 * { box-sizing: border-box; }
 body {
-  margin: 0; width: 276px;
+  margin: 0; width: 300px;
   font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
   font-size: 13px; color: #3d3d3a; background: #faf9f7;
 }
@@ -9,6 +9,8 @@ body {
 
 .p-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .p-title { font-size: 14px; font-weight: 700; }
+/* The plan ("Max 20x"), from the org's rate-limit tier. */
+.p-tier { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: rgba(216,90,48,0.12); color: #b4441f; }
 
 .p-rows { display: flex; flex-direction: column; gap: 12px; min-height: 40px; }
 .p-empty { opacity: 0.6; font-size: 12px; padding: 8px 0; }
@@ -24,6 +26,13 @@ body {
 .p-fill.mid  { background: #d85a30; }
 .p-fill.high { background: #e2564d; }
 .p-reset { margin-top: 3px; font-size: 10px; opacity: 0.55; }
+
+/* Extra usage. The chip says what the spending is doing right now. */
+.p-chip { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; margin-left: 4px; }
+.p-chip-live { background: rgba(216,90,48,0.14); color: #b4441f; }
+.p-chip-cap  { background: rgba(226,86,77,0.14); color: #c03a32; }
+.p-chip-off  { background: rgba(0,0,0,0.07); }
+.p-note-live { opacity: 0.85; color: #b4441f; }
 
 .p-show { margin-top: 14px; }
 .p-show-label { font-size: 11px; opacity: 0.6; }
@@ -47,4 +56,8 @@ body {
   .p-foot { border-top-color: rgba(255,255,255,0.12); }
   .p-btn { background: #333330; border-color: rgba(255,255,255,0.14); }
   .p-btn:hover { background: #3d3d3a; }
+  .p-tier, .p-chip-live { background: rgba(216,90,48,0.22); color: #f0a07f; }
+  .p-chip-cap { background: rgba(226,86,77,0.22); color: #f2a19b; }
+  .p-chip-off { background: rgba(255,255,255,0.1); }
+  .p-note-live { color: #f0a07f; }
 }
