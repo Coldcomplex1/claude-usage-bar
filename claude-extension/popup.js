@@ -5,11 +5,15 @@
 var LAST_KEY = "cub_last";
 var SHOW_KEY = "cub_show";
 var FREE_KEY = "cub_free_session";
+var INSIGHTS_KEY = "cub_insights";   // burn-rate forecasts from the history (history.js)
+var PREFS_KEY = "cub_prefs";
 var DEFAULT_SHOW = { session: true, allModels: true, scoped: true, credits: true };
 var FRESH_MS = 60000;      // opening the popup on newer numbers than this costs no request
 
 var shown = null;          // what is currently painted, for the "updated" line
 var statusTimer = null;
+var insights = {};         // limit id -> { rate, fullAt, projected, resetAt }
+var prefs = {};
 
 function plural(n, w){ return n + " " + w + (n === 1 ? "" : "s"); }
 
@@ -22,12 +26,37 @@ function el(tag, cls, text){
   return n;
 }
 
-function track(pct){
+function track(pct, paceAt){
   var t = el("div", "p-track");
-  var f = el("div", "p-fill " + CUB.colorLevel(pct));
+  var f = el("div", "p-fill " + CUB.colorLevel(pct, prefs));
   f.style.width = (pct == null ? 0 : pct) + "%";
   t.appendChild(f);
+  if (paceAt != null){
+    var tick = el("div", "p-pace");
+    tick.style.left = paceAt.toFixed(1) + "%";
+    t.appendChild(tick);
+  }
   return t;
+}
+
+// Where an even pace would be by now, for the tick, or null to leave it off.
+function paceAt(l){
+  if (prefs.pace === false) return null;
+  var p = CUB.paceOf(l);
+  return p && p.expected >= 2 && p.expected <= 98 ? p.expected : null;
+}
+
+// One line on how the limit is going: a warning when it will run out before it
+// resets, otherwise the pace and where the burn rate puts it at the reset.
+function outlook(l){
+  var f = CUB.forecastOf(l, insights[l.id]);
+  if (f && f.warn) return el("div", "p-fc p-fc-warn", f.text);
+  var bits = [];
+  var p = CUB.paceOf(l);
+  if (p && p.expected >= 2) bits.push(CUB.paceText(p));
+  var ins = insights[l.id];
+  if (f && ins && ins.projected != null) bits.push("~" + Math.round(ins.projected) + "% by the reset at this rate");
+  return bits.length ? el("div", "p-fc", bits.join(" · ")) : null;
 }
 
 function head(label, sub, value){
@@ -71,8 +100,10 @@ function limitRow(l){
   row.setAttribute("aria-label", aria);
   if (l.tip) row.title = l.tip;
   row.appendChild(head(l.label, l.sub, pct == null ? "–" : pct + "%"));
-  row.appendChild(track(pct));
+  row.appendChild(track(pct, pct == null ? null : paceAt(l)));
   if (left) row.appendChild(el("div", "p-reset", "resets in " + left + (at ? " · " + at : "")));
+  var o = pct == null ? null : outlook(l);
+  if (o) row.appendChild(o);
   return row;
 }
 
@@ -209,8 +240,12 @@ function wireShow(){
   });
 }
 
+function insightsOf(v){ return v && v.limits && typeof v.limits === "object" ? v.limits : {}; }
+
 document.addEventListener("DOMContentLoaded", function(){
-  chrome.storage.local.get([LAST_KEY], function(o){
+  chrome.storage.local.get([LAST_KEY, INSIGHTS_KEY, PREFS_KEY], function(o){
+    insights = insightsOf(o[INSIGHTS_KEY]);
+    prefs = o[PREFS_KEY] || {};
     if (o[LAST_KEY]){ paint(o[LAST_KEY]); showAge(); }   // paint the cache first, then decide
     refresh(false);
   });
@@ -220,6 +255,11 @@ document.addEventListener("DOMContentLoaded", function(){
   chrome.storage.onChanged.addListener(function(changes, area){
     if (area !== "local") return;
     if (changes[LAST_KEY] && changes[LAST_KEY].newValue){ paint(changes[LAST_KEY].newValue); showAge(); }
+    if (changes[INSIGHTS_KEY] || changes[PREFS_KEY]){
+      if (changes[INSIGHTS_KEY]) insights = insightsOf(changes[INSIGHTS_KEY].newValue);
+      if (changes[PREFS_KEY]) prefs = changes[PREFS_KEY].newValue || {};
+      if (shown && shown.reported !== false) render(shown);
+    }
     // A tab counted a send while the popup was open.
     if (changes[FREE_KEY] && shown && shown.reported === false) render(shown, CUBS.summarize(changes[FREE_KEY].newValue));
   });

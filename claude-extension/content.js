@@ -27,6 +27,8 @@
   var BADGE_KEY = "cub_badge";
   var SETUP_KEY = "cub_setup";
   var FREE_KEY = "cub_free_session";
+  var INSIGHTS_KEY = "cub_insights";  // burn-rate forecasts, worked out by the service worker
+  var PREFS_KEY = "cub_prefs";
 
   var TICK_MS = 30000;             // repaint the countdown; also the refetch check
   var POLL_MS = 60000;             // how stale the numbers may get before we refetch
@@ -35,12 +37,20 @@
   var STALE_MS = 8 * 60 * 1000;    // past this the readout is dimmed as out of date
 
   var DEFAULT_SHOW = { session: true, allModels: true, scoped: true, credits: true };
+  var DEFAULT_PREFS = { pace: true };
+
+  // How far ahead a weekly forecast has to land before the bar spends a line on
+  // it. "Full in 2d 4h" is worth knowing in the popup, not under every message;
+  // a session forecast is always inside five hours.
+  var FORECAST_HORIZON_MS = { session: Infinity, weekly: 12 * 60 * 60 * 1000 };
 
   var enabled = true, lastData = null, tickTimer = null, placeTimer = null;
   var inFlight = null;   // in-progress fetch, so the poll and the background alarm share one
   var show = Object.assign({}, DEFAULT_SHOW);
   var design = "1";
   var freeStore = null;   // raw cub_free_session; summarized per paint so the window rolls
+  var insights = {};      // limit id -> { rate, fullAt, projected, resetAt } (history.js)
+  var prefs = Object.assign({}, DEFAULT_PREFS);
 
   // Stand-ins drawn before the first reading lands, so the bar has its shape
   // (and somewhere to put "!") from the moment the page loads.
@@ -107,6 +117,12 @@
       if (left) t += ", resets in " + left + (CUB.fmtResetAt(l.resetAt) ? " (" + CUB.fmtResetAt(l.resetAt) + ")" : "");
     }
     t += "\n" + d.tip;
+    if (hasData(l)){
+      var p = CUB.paceOf(l);
+      if (p && p.expected >= 2) t += "\n" + CUB.paceText(p) + " (even pace: " + Math.round(p.expected) + "% by now)";
+      var f = forecastFor(l);
+      if (f) t += "\n" + f.text;
+    }
     // The compact widget shows one per-model limit; the rest are named here.
     if (row.others && row.others.length > 1){
       t += "\n" + row.others.map(function(o){ return o.label + " " + pctOf(o) + "%"; }).join(" · ");
@@ -131,6 +147,37 @@
     node.setAttribute("aria-valuetext", ariaFor(row));
     node.setAttribute("aria-label", ariaFor(row));
     node.setAttribute("title", tipFor(row));
+  }
+
+  // ---- Pace and forecast ---------------------------------------------------
+
+  function forecastFor(l){ return CUB.forecastOf(l, insights[l.id]); }
+
+  // A forecast earns a line in the bar (and the warning mark in Design 2) only
+  // when it says the limit runs out before it resets, soon enough to matter.
+  function warningFor(l){
+    if (!hasData(l)) return null;
+    var f = forecastFor(l);
+    if (!f || !f.warn) return null;
+    var horizon = FORECAST_HORIZON_MS[l.group] || 0;
+    return f.fullAt - Date.now() <= horizon ? f : null;
+  }
+
+  // Where an even pace would be by now, as a left offset for the tick, or null
+  // to hide it: switched off, no window to measure, or too close to either end
+  // to read as anything but the end of the bar.
+  function paceLeft(l){
+    if (prefs.pace === false || !hasData(l)) return null;
+    var p = CUB.paceOf(l);
+    if (!p || p.expected < 2 || p.expected > 98) return null;
+    return p.expected;
+  }
+
+  function setPace(tick, l){
+    if (!tick) return;
+    var at = paceLeft(l);
+    tick.hidden = at == null;
+    if (at != null) tick.style.left = at.toFixed(1) + "%";
   }
 
   // ---- Extra usage ---------------------------------------------------------
@@ -331,10 +378,11 @@
     node.setAttribute("data-seg", row.id);
     node.innerHTML =
       '<span class="cub-label"><span class="cub-name"></span> <span class="cub-sub"></span></span>'+
-      '<span class="cub-track"><span class="cub-fill"></span></span>'+
+      '<span class="cub-track"><span class="cub-fill"></span><span class="cub-pace" hidden></span></span>'+
       '<span class="cub-note" hidden></span>'+
       '<span class="cub-val">–</span>'+
-      '<span class="cub-reset"></span>';
+      '<span class="cub-reset"></span>'+
+      '<span class="cub-fc" hidden></span>';
     return node;
   }
 
@@ -360,7 +408,17 @@
     note.hidden = false; note.textContent = FREE_NOTE;
     node.querySelector(".cub-val").textContent = f.count + " msg";
     node.querySelector(".cub-reset").textContent = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
+    setForecastLine(node, null);
     setCount(node);
+  }
+
+  // The line under a row that is going to run out before it resets.
+  function setForecastLine(node, warn){
+    var fc = node.querySelector(".cub-fc");
+    if (!fc) return;
+    fc.hidden = !warn;
+    setText(fc, warn ? warn.text : "");
+    node.classList.toggle("cub-warn", !!warn);
   }
 
   function fillSeg(node, row){
@@ -371,6 +429,8 @@
     var reset = node.querySelector(".cub-reset");
     node.querySelector(".cub-track").hidden = false;
     node.querySelector(".cub-note").hidden = true;
+    setPace(node.querySelector(".cub-pace"), l);
+    setForecastLine(node, warningFor(l));
     if (!hasData(l)){
       val.textContent = "–"; fill.style.width = "0%"; fill.className = "cub-fill"; reset.textContent = "";
       setProgress(node, row);
@@ -391,6 +451,8 @@
     setLabel(node, c.label || "Extra usage", "");
     var track = node.querySelector(".cub-track"), note = node.querySelector(".cub-note");
     var fill = node.querySelector(".cub-fill"), reset = node.querySelector(".cub-reset");
+    node.querySelector(".cub-pace").hidden = true;
+    setForecastLine(node, null);
     node.querySelector(".cub-val").textContent = barMoney(c.used, c.currency);
     if (c.limit){
       track.hidden = false; note.hidden = true;
@@ -524,10 +586,10 @@
     el.setAttribute("data-seg", row.id);
     var val = '<span class="cub-i-val">–</span>';
     var html;
-    if (row.id === "session") html = val + '<span class="cub-i-bar"><span class="cub-i-fill"></span></span>';
+    if (row.id === "session") html = val + '<span class="cub-i-bar"><span class="cub-i-fill"></span><span class="cub-i-pace" hidden></span></span>';
     else if (row.kind === "credits") html = RING_HTML + val;
     else html = RING_HTML + val + (row.id !== "allModels" ? '<span class="cub-i-name"></span>' : "");
-    el.innerHTML = html + '<span class="cub-i-reset" hidden></span>';
+    el.innerHTML = html + '<span class="cub-i-warn" hidden aria-hidden="true">!</span><span class="cub-i-reset" hidden></span>';
     return el;
   }
 
@@ -555,6 +617,8 @@
     var f = freeNow();
     var ind = node.querySelector(".cub-i-ring") || node.querySelector(".cub-i-bar");
     if (ind) ind.hidden = true;
+    var warn0 = node.querySelector(".cub-i-warn");
+    if (warn0) warn0.hidden = true;
     node.querySelector(".cub-i-val").textContent = f.count + " msg";
     var reset = node.querySelector(".cub-i-reset");
     reset.hidden = false;
@@ -570,6 +634,8 @@
     if (ind0) ind0.hidden = false;
     node.querySelector(".cub-i-reset").hidden = true;
     setText(node.querySelector(".cub-i-name"), shortName(row.def.label));
+    setPace(node.querySelector(".cub-i-pace"), l);
+    node.querySelector(".cub-i-warn").hidden = !warningFor(l);
     if (!hasData(l)){
       val.textContent = "–";
       if (ring) setRing(node, 0, "");
@@ -600,6 +666,7 @@
     if (c.limit){ var pct = Math.round(c.pct || 0); setRing(node, pct, colorClass(pct)); }
     node.querySelector(".cub-i-val").textContent = barMoney(c.used, c.currency);
     node.querySelector(".cub-i-reset").hidden = true;
+    node.querySelector(".cub-i-warn").hidden = true;
     setCreditsState(node, c);
   }
 
@@ -1079,6 +1146,9 @@
     // rather than from whatever the counter handed back.
     if (changes[FREE_KEY]){ freeStore = changes[FREE_KEY].newValue || null; if (enabled) render(); }
     if (changes[SHOW_KEY] && changes[SHOW_KEY].newValue){ show = Object.assign({}, DEFAULT_SHOW, changes[SHOW_KEY].newValue); if (enabled) render(); }
+    // The service worker worked out a new forecast from the history.
+    if (changes[INSIGHTS_KEY]){ insights = insightsOf(changes[INSIGHTS_KEY].newValue); if (enabled) render(); }
+    if (changes[PREFS_KEY]){ prefs = Object.assign({}, DEFAULT_PREFS, changes[PREFS_KEY].newValue || {}); if (enabled) render(); }
     if (changes[DESIGN_KEY]) { switchDesign(changes[DESIGN_KEY].newValue === "2" ? "2" : "1"); }
     // Answered somewhere else (the install tab, or another claude.ai tab): close
     // our box. Our own answer is skipped, or picking a design would shut the box
@@ -1111,9 +1181,13 @@
     refresh(FOCUS_MAX_AGE_MS);
   });
 
-  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, SHOW_KEY, DESIGN_KEY, SETUP_KEY, FREE_KEY], function (o){
+  function insightsOf(v){ return v && v.limits && typeof v.limits === "object" ? v.limits : {}; }
+
+  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, SHOW_KEY, DESIGN_KEY, SETUP_KEY, FREE_KEY, INSIGHTS_KEY, PREFS_KEY], function (o){
     if (o[LAST_KEY]) lastData = o[LAST_KEY];
     if (o[FREE_KEY]) freeStore = o[FREE_KEY];
+    insights = insightsOf(o[INSIGHTS_KEY]);
+    prefs = Object.assign({}, DEFAULT_PREFS, o[PREFS_KEY] || {});
     if (o[SHOW_KEY]) show = Object.assign({}, DEFAULT_SHOW, o[SHOW_KEY]);
     // Design 1 stays the fallback while setup is pending, so the bar works from
     // the moment of install rather than waiting on an answer that may not come.

@@ -14,7 +14,7 @@
 //
 // The content script reacts to the cub_enabled storage change to show/hide the bar.
 
-importScripts("usage.js", "session.js");   // classic service worker: CUB.getUsage(), CUBS.summarize()
+importScripts("usage.js", "session.js", "history.js");   // classic service worker: CUB, CUBS, CUBH
 
 var TOGGLE_KEY = "cub_enabled";
 var LAST_KEY = "cub_last";
@@ -129,11 +129,24 @@ chrome.commands.onCommand.addListener(function (command) {
   });
 });
 
+// ---- Every new reading -----------------------------------------------------
+// This worker is the one place that sees every reading land, whichever surface
+// fetched it, so it is the one writer of the history (history.js): readings
+// are recorded one at a time, in the order they arrive, on a single chain.
+// A failure is logged and dropped; the next reading starts a fresh link.
+var pipeline = Promise.resolve();
+function onReading(result){
+  pipeline = pipeline.then(function (){ return CUBH.record(result); })
+    .catch(function (e){ try { console.debug("[Claude Usage Bar] history", e); } catch (e2) {} });
+  return pipeline;
+}
+
 // New usage numbers (cub_last), a master-toggle flip, or a badge-settings change
 // all wake the service worker here and repaint the badge.
 chrome.storage.onChanged.addListener(function (changes, area){
   if (area !== "local") return;
   if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY] || changes[FREE_KEY]) refreshBadge();
+  if (changes[LAST_KEY] && changes[LAST_KEY].newValue) onReading(changes[LAST_KEY].newValue);
 });
 
 // ---- Background refresh --------------------------------------------------

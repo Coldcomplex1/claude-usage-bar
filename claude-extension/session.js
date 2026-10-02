@@ -17,8 +17,10 @@
 
 var CUBS = (function () {
   var KEY = "cub_free_session";
+  var ACTIVITY_KEY = "cub_activity";    // { "YYYY-MM-DD": [24 hourly counts] }, for the dashboard
   var WINDOW_MS = 5 * 60 * 60 * 1000;   // Claude's free window is a rolling 5 hours
   var MAX_STAMPS = 600;                 // a hard cap, so storage can't grow without bound
+  var ACTIVITY_DAYS = 90;
 
   // Stamps older than the window are gone: the window is rolling, so the
   // reading is always "since the oldest message still inside it".
@@ -48,17 +50,35 @@ var CUBS = (function () {
     chrome.storage.local.get([KEY], function (o){ cb(summarize(o[KEY])); });
   }
 
+  function pad(n){ return (n < 10 ? "0" : "") + n; }
+  function dayOf(d){ return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+
+  // The dashboard's activity view: how many sends landed in each hour of each
+  // local day, kept for ninety days. Counts per hour only -- not the stamps,
+  // and never anything about what was sent.
+  function tally(act, now, n){
+    act = act && typeof act === "object" ? act : {};
+    var d = new Date(now), key = dayOf(d);
+    var row = Array.isArray(act[key]) && act[key].length === 24 ? act[key] : null;
+    if (!row){ row = []; for (var h = 0; h < 24; h++) row.push(0); act[key] = row; }
+    row[d.getHours()] += n;
+    var cut = dayOf(new Date(now - ACTIVITY_DAYS * 24 * 60 * 60 * 1000));
+    Object.keys(act).forEach(function (k){ if (k < cut) delete act[k]; });
+    return act;
+  }
+
   // Append n sends and hand back the new summary. Read-modify-write, so two
   // tabs counting at the same moment is the one race here; the window is five
   // hours long and the cost of losing one increment to it is a count that is
   // low by one, which is why this is not worth a lock.
   function record(n, cb){
-    chrome.storage.local.get([KEY], function (o){
+    chrome.storage.local.get([KEY, ACTIVITY_KEY], function (o){
       var now = Date.now();
       var stamps = prune(o[KEY] && o[KEY].stamps, now);
       for (var i = 0; i < n; i++) stamps.push(now);
       var next = { stamps: stamps.slice(-MAX_STAMPS), updatedAt: now };
-      chrome.storage.local.set({ [KEY]: next }, function (){ if (cb) cb(summarize(next, now)); });
+      chrome.storage.local.set({ [KEY]: next, [ACTIVITY_KEY]: tally(o[ACTIVITY_KEY], now, n) },
+                               function (){ if (cb) cb(summarize(next, now)); });
     });
   }
 
@@ -179,7 +199,7 @@ var CUBS = (function () {
     addedEls = [];
   }
 
-  return { KEY: KEY, WINDOW_MS: WINDOW_MS,
-           prune: prune, summarize: summarize, read: read, record: record, reset: reset,
+  return { KEY: KEY, ACTIVITY_KEY: ACTIVITY_KEY, WINDOW_MS: WINDOW_MS,
+           prune: prune, summarize: summarize, read: read, record: record, reset: reset, tally: tally,
            decide: decide, watch: watch, unwatch: unwatch };
 })();

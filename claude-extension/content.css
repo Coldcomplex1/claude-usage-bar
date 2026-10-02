@@ -71,14 +71,23 @@
 #cub-bar .cub-name { font-weight: 600; }
 #cub-bar .cub-sub { font-size: 10px; opacity: 0.5; }
 
+/* Not overflow:hidden: the pace tick stands a little proud of the track. The
+   fill carries its own rounding, so nothing else needed clipping. */
 #cub-bar .cub-track {
-  display: block; height: 5px; border-radius: 999px;
-  background: var(--cub-track); overflow: hidden;
+  display: block; position: relative; height: 5px; border-radius: 999px;
+  background: var(--cub-track);
 }
 #cub-bar .cub-fill {
   display: block; height: 100%; width: 0; border-radius: 999px;
   background: var(--cub-empty); transition: width 0.4s ease, background 0.3s ease;
 }
+/* Where an even pace would have this window by now: past the tick means
+   spending faster than the window refills. */
+#cub-bar .cub-pace, #cub-inline .cub-i-pace {
+  position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px;
+  border-radius: 1px; background: var(--cub-fg); opacity: 0.5; pointer-events: none;
+}
+#cub-bar .cub-pace[hidden], #cub-inline .cub-i-pace[hidden] { display: none; }
 #cub-bar .cub-fill.cub-low  { background: var(--cub-low); }
 #cub-bar .cub-fill.cub-mid  { background: var(--cub-mid); }
 #cub-bar .cub-fill.cub-high { background: var(--cub-high); }
@@ -97,6 +106,14 @@
    so hiding it has to be said here. */
 #cub-bar .cub-track[hidden], #cub-bar .cub-note[hidden] { display: none; }
 #cub-bar .cub-reset { text-align: left; font-size: 10px; opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The forecast, on a line of its own under a row that will run out before it
+   resets. It starts under the bar, so the label column stays clean. */
+#cub-bar .cub-fc {
+  grid-column: 2 / -1; margin-top: 3px; font-size: 10.5px; color: var(--cub-mid);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#cub-bar .cub-fc[hidden] { display: none; }
 
 /* Extra usage being billed right now (a limit is full and extra usage is on):
    a dot before the name, in the warning colour, so it reads on sight. */
@@ -136,9 +153,16 @@
 #cub-inline .cub-i-name { font-size: 10px; opacity: 0.6; margin-left: -3px; }
 
 #cub-inline .cub-i-bar {
-  display: inline-block; width: 80px; height: 5px; border-radius: 999px;
-  background: var(--cub-track); overflow: hidden;
+  display: inline-block; position: relative; width: 80px; height: 5px; border-radius: 999px;
+  background: var(--cub-track);
 }
+/* Design 2's forecast: a small mark after the value; the tooltip says the rest. */
+#cub-inline .cub-i-warn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 50%; margin-left: -2px;
+  background: var(--cub-mid); color: #fff; font-size: 9px; font-weight: 700; line-height: 1;
+}
+#cub-inline .cub-i-warn[hidden] { display: none; }
 #cub-inline .cub-i-fill {
   display: block; height: 100%; width: 0; border-radius: 999px;
   background: var(--cub-empty); transition: width 0.4s ease, background 0.3s ease;

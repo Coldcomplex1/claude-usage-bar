@@ -20,7 +20,12 @@ body {
 .p-label { font-weight: 600; }
 .p-sub { font-size: 10px; opacity: 0.5; }
 .p-val { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
-.p-track { height: 6px; border-radius: 999px; background: rgba(0,0,0,0.09); overflow: hidden; }
+.p-track { position: relative; height: 6px; border-radius: 999px; background: rgba(0,0,0,0.09); }
+/* Where an even pace would be by now. */
+.p-pace { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; border-radius: 1px; background: currentColor; opacity: 0.5; }
+/* How the limit is going: pace and projection, or the warning in orange. */
+.p-fc { margin-top: 2px; font-size: 10px; opacity: 0.7; }
+.p-fc-warn { opacity: 1; color: #b4441f; font-weight: 600; }
 .p-fill { height: 100%; width: 0; border-radius: 999px; background: #b9b8b1; transition: width 0.4s ease; }
 .p-fill.low  { background: #378add; }
 .p-fill.mid  { background: #d85a30; }
@@ -59,5 +64,5 @@ body {
   .p-tier, .p-chip-live { background: rgba(216,90,48,0.22); color: #f0a07f; }
   .p-chip-cap { background: rgba(226,86,77,0.22); color: #f2a19b; }
   .p-chip-off { background: rgba(255,255,255,0.1); }
-  .p-note-live { color: #f0a07f; }
+  .p-note-live, .p-fc-warn { color: #f0a07f; }
 }
