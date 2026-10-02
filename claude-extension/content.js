@@ -38,7 +38,7 @@
   var STALE_MS = 8 * 60 * 1000;    // past this the readout is dimmed as out of date
 
   var DEFAULT_SHOW = { session: true, allModels: true, scoped: true, credits: true };
-  var DEFAULT_PREFS = { pace: true };
+  var DEFAULT_PREFS = { pace: true, hideBelow: 0 };
 
   // How far ahead a weekly forecast has to land before the bar spends a line on
   // it. "Full in 2d 4h" is worth knowing in the popup, not under every message;
@@ -60,7 +60,7 @@
     { id: "allModels", label: "All models", sub: "7d", group: "weekly",  tip: "Weekly usage, across all models" }
   ];
 
-  function colorClass(p){ return "cub-" + CUB.colorLevel(p); }
+  function colorClass(p){ return "cub-" + CUB.colorLevel(p, prefs); }
   function pctOf(l){ return Math.max(0, Math.min(100, Math.round(l.pct))); }
   function hasData(l){ return !!l && l.pct != null; }
 
@@ -261,6 +261,20 @@
     var c = creditsShown();
     if (c) rows.push({ id: "credits", kind: "credits", credits: c });
     return rows;
+  }
+
+  // "Hide the bar until usage reaches X%": out of the way while there is plenty
+  // left. Anything that needs saying overrides it -- a forecast that a limit
+  // runs out before it resets, or extra usage billing -- and the free plan's
+  // count, which has no percentage to compare, always shows.
+  function hiddenByPrefs(rows){
+    var floor = Number(prefs.hideBelow) || 0;
+    if (!floor || isFree()) return false;
+    if (!lastData) return true;
+    return !rows.some(function(r){
+      if (r.kind === "credits") return CUB.creditsInUse(lastData) || r.credits.capReached;
+      return r.kind === "limit" && hasData(r.limit) && (r.limit.pct >= floor || !!warningFor(r.limit));
+    });
   }
 
   // Make `root` hold exactly these rows, in this order, reusing the node each
@@ -482,7 +496,7 @@
       else fillSeg(node, r);
     });
     barEl.classList.toggle("cub-stale", isStale());
-    barEl.style.display = rows.length ? "" : "none";
+    barEl.style.display = rows.length && !hiddenByPrefs(rows) ? "" : "none";
   }
 
   // The chat input differs across surfaces (contenteditable on /new & chats, and
@@ -682,7 +696,14 @@
       else fillInlineSeg(node, r);
     });
     inlineEl.classList.toggle("cub-stale", isStale());
-    inlineEl.style.display = rows.length ? "" : "none";
+    var showIt = rows.length && !hiddenByPrefs(rows);
+    var wasHidden = inlineEl.style.display === "none";
+    inlineEl.style.display = showIt ? "" : "none";
+    // Coming back from auto-hide: alignInline measured nothing while it was
+    // hidden, so line it up against the "+" again now it has a size.
+    if (showIt && wasHidden && design === "2" && anchor && anchor.isConnected && !inlineEl.classList.contains("cub-inline-row")){
+      requestAnimationFrame(function(){ alignInline(anchor); });
+    }
   }
 
   // Find the toolbar's "+" button. We can't assume the toolbar lives in any one

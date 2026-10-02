@@ -6,7 +6,10 @@ var BADGE_KEY = "cub_badge";
 var MANUAL_KEY = "cub_org_manual";
 var DESIGN_KEY = "cub_design";
 var SETUP_KEY = "cub_setup";
+var SHOW_KEY = "cub_show";
+var PREFS_KEY = "cub_prefs";
 var DEFAULT_BADGE = { enabled: false, source: "session" };
+var DEFAULT_SHOW = { session: true, allModels: true, scoped: true, credits: true };
 
 // ---- Master on/off -------------------------------------------------------
 function loadToggle(){
@@ -22,6 +25,82 @@ function loadDesign(){
     document.querySelectorAll('input[name="design"]').forEach(function(r){
       r.checked = r.value === d;
     });
+  });
+}
+
+// ---- What the bar shows ----------------------------------------------------
+// The rows (cub_show, shared with the popup's checkboxes) and the look
+// (cub_prefs): pace marker, auto-hide, the colour thresholds, and whether
+// the history is kept at all.
+function loadShow(){
+  chrome.storage.local.get([SHOW_KEY], function(o){
+    var show = Object.assign({}, DEFAULT_SHOW, o[SHOW_KEY] || {});
+    document.querySelectorAll("[data-show]").forEach(function(cb){ cb.checked = show[cb.getAttribute("data-show")] !== false; });
+  });
+}
+function wireShow(){
+  document.querySelectorAll("[data-show]").forEach(function(cb){
+    cb.addEventListener("change", function(){
+      chrome.storage.local.get([SHOW_KEY], function(o){
+        var show = Object.assign({}, DEFAULT_SHOW, o[SHOW_KEY] || {});
+        show[cb.getAttribute("data-show")] = cb.checked;
+        chrome.storage.local.set({ [SHOW_KEY]: show });
+      });
+    });
+  });
+}
+
+function savePrefs(patch){
+  chrome.storage.local.get([PREFS_KEY], function(o){
+    chrome.storage.local.set({ [PREFS_KEY]: Object.assign({}, o[PREFS_KEY] || {}, patch) });
+  });
+}
+function loadPrefs(){
+  chrome.storage.local.get([PREFS_KEY], function(o){
+    var p = o[PREFS_KEY] || {};
+    var c = CUB.colorsOf(p);
+    document.getElementById("pref-pace").checked = p.pace !== false;
+    document.getElementById("pref-history").checked = p.history !== false;
+    document.getElementById("pref-hide").value = String(p.hideBelow || 0);
+    document.getElementById("pref-mid").value = c.mid;
+    document.getElementById("pref-high").value = c.high;
+  });
+}
+// Saved only as a usable pair: orange has to start before red does.
+function saveColors(){
+  var mid = Number(document.getElementById("pref-mid").value), high = Number(document.getElementById("pref-high").value);
+  var err = document.getElementById("pref-colors-err");
+  if (!(mid >= 1 && mid <= 99 && high > mid && high <= 100)){
+    err.textContent = "Orange has to start below red, between 1% and 100%.";
+    return;
+  }
+  err.textContent = "";
+  savePrefs({ colors: { mid: Math.round(mid), high: Math.round(high) } });
+}
+function wirePrefs(){
+  document.getElementById("pref-pace").addEventListener("change", function(e){ savePrefs({ pace: e.target.checked }); });
+  document.getElementById("pref-hide").addEventListener("change", function(e){ savePrefs({ hideBelow: Number(e.target.value) || 0 }); });
+  document.getElementById("pref-mid").addEventListener("change", saveColors);
+  document.getElementById("pref-high").addEventListener("change", saveColors);
+  document.getElementById("pref-colors-reset").addEventListener("click", function(){
+    savePrefs({ colors: null });
+    document.getElementById("pref-colors-err").textContent = "";
+    var c = CUB.colorsOf(null);
+    document.getElementById("pref-mid").value = c.mid;
+    document.getElementById("pref-high").value = c.high;
+  });
+  document.getElementById("pref-history").addEventListener("change", function(e){
+    savePrefs({ history: e.target.checked });
+    document.getElementById("history-status").textContent = e.target.checked ? "" : "Not recording. What is already kept stays until you clear it.";
+  });
+  document.getElementById("open-dashboard").addEventListener("click", function(){
+    chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+  });
+  document.getElementById("clear-history").addEventListener("click", async function(){
+    if (!confirm("Delete the usage history kept in this browser? Your current numbers stay.")) return;
+    await CUBH.clear();
+    chrome.storage.local.remove(["cub_activity"]);
+    document.getElementById("history-status").textContent = "History cleared.";
   });
 }
 
@@ -207,14 +286,17 @@ async function showScan(){
   }
 }
 
-// ---- Hotkey --------------------------------------------------------------
+// ---- Hotkeys -------------------------------------------------------------
+// The popup's has no default, so it never collides with anything; it reads
+// "not set" until the user picks one at chrome://extensions/shortcuts.
 function loadHotkey(){
+  function show(id, cmds, name){
+    var c = (cmds || []).find(function(x){ return x.name === name; });
+    document.getElementById(id).textContent = (c && c.shortcut) ? c.shortcut : "not set";
+  }
   try {
-    chrome.commands.getAll(function(cmds){
-      var c = (cmds || []).find(function(x){ return x.name === "toggle-bar"; });
-      document.getElementById("hk").textContent = (c && c.shortcut) ? c.shortcut : "not set";
-    });
-  } catch (e){ document.getElementById("hk").textContent = "not set"; }
+    chrome.commands.getAll(function(cmds){ show("hk", cmds, "toggle-bar"); show("hk-popup", cmds, "_execute_action"); });
+  } catch (e){ document.getElementById("hk").textContent = "not set"; document.getElementById("hk-popup").textContent = "not set"; }
 }
 
 document.addEventListener("DOMContentLoaded", function(){
@@ -222,6 +304,8 @@ document.addEventListener("DOMContentLoaded", function(){
   loadDesign();
   loadBadge();
   loadAlerts(); wireAlerts();
+  loadShow(); wireShow();
+  loadPrefs(); wirePrefs();
   loadHotkey();
 
   chrome.storage.local.get([LAST_KEY], function(o){

@@ -36,6 +36,19 @@ body {
 .o-radio { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
 .o-radio input { accent-color: #d85a30; width: 15px; height: 15px; cursor: pointer; }
 
+/* What the bar shows. */
+.o-show { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.o-select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 7px; border: 1px solid rgba(0,0,0,0.15); background: #fff; color: inherit; flex: none; }
+.o-num { font: inherit; font-size: 12px; width: 52px; padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.15); background: #fff; color: inherit; font-variant-numeric: tabular-nums; }
+.o-row-sub .o-num { margin: 0 2px; }
+.o-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin: 0 4px 0 2px; vertical-align: 0; }
+.o-sw-low { background: #378add; } .o-sw-mid { background: #d85a30; } .o-sw-high { background: #e2564d; }
+.o-err { color: #c03a32; opacity: 1; }
+.o-err:empty { display: none; }
+.o-hint { margin-top: 10px; }
+.o-keys { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.o-key { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
+
 /* Alert thresholds: toggle chips, several at once. */
 .o-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .o-chip { position: relative; cursor: pointer; }
@@ -112,6 +125,8 @@ body {
   .o-chip span { border-color: rgba(255,255,255,0.16); }
   .o-chip input:checked + span { background: rgba(216,90,48,0.18); color: #f0a07f; }
   .o-row-inner { border-top-color: rgba(255,255,255,0.10); }
+  .o-select, .o-num { background: #333330; border-color: rgba(255,255,255,0.16); }
+  .o-err { color: #f2a19b; }
   .o-illus-composer { background: #3a3a37; border-color: rgba(255,255,255,0.14); }
   .o-illus-2 .o-illus-plus { border-color: rgba(255,255,255,0.4); }
   .o-illus-2 .o-illus-chip { background: rgba(255,255,255,0.18); }

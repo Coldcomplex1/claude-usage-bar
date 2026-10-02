@@ -11,6 +11,10 @@
 // the popup or a claude.ai tab. Which window (and whether the badge shows at
 // all) is configured on the Settings page and stored in cub_badge; the numbers
 // come from cub_last, written by the content script and popup. Off by default.
+// A full limit shows the time until it resets instead of "100".
+//
+// The icon's right-click menu adds Refresh now, the dashboard, and Claude's
+// own usage page.
 //
 // The content script reacts to the cub_enabled storage change to show/hide the bar.
 
@@ -22,6 +26,7 @@ var BADGE_KEY = "cub_badge";
 var SETUP_KEY = "cub_setup";     // first-run chooser: { done, at } once answered
 var FREE_KEY = "cub_free_session";  // free plan: locally counted sends (session.js)
 var HEALTH_KEY = "cub_health";   // refresh bookkeeping/backoff; nothing renders it
+var PREFS_KEY = "cub_prefs";     // colour thresholds, among others (Settings)
 var DEFAULT_BADGE = { enabled: false, source: "session" };
 
 var ALARM = "cub-refresh";
@@ -32,43 +37,75 @@ var MAX_BACKOFF_MS = 30 * 60 * 1000;
 var DIRECT_BLOCK_MS = 6 * 60 * 60 * 1000;  // how long to stop fetching from here after 403s
 var refreshing = false;                    // reentrancy guard, per worker lifetime
 
-// Thresholds/colors match the in-page bar in content.css: blue < 30%,
-// Claude orange 30–80%, red > 80%.
+// Colors match the in-page bar in content.css: blue, then Claude orange, then
+// red, at the thresholds Settings sets (30% and 80% unless changed).
 var BADGE_LOW = "#378add", BADGE_MID = "#d85a30", BADGE_HIGH = "#e2564d";
-function badgeColor(pct){ return pct > 80 ? BADGE_HIGH : pct >= 30 ? BADGE_MID : BADGE_LOW; }
-
-function winPct(m){ return (m && m.available && m.pct != null) ? Math.round(m.pct) : null; }
+function badgeColor(pct, prefs){
+  var lv = CUB.colorLevel(pct, prefs);
+  return lv === "high" ? BADGE_HIGH : lv === "mid" ? BADGE_MID : BADGE_LOW;
+}
 
 // A free account has no percentage to show, so the badge carries the counted
 // message total instead, in the neutral colour: a count is not 0-100, and
 // running it through the usage thresholds would read as a warning it is not.
 function isFree(data){ return !!data && data.reported === false; }
 
-// The % the badge should show for the chosen source, or null if unavailable.
-function badgePct(data, source){
+// The limit the chosen source is about, or null when the reading has none.
+//   session / allModels   that window
+//   highest               the higher of those two (the original choice)
+//   tightest              the fullest of every limit, per-model ones included
+function badgeLimit(data, source){
+  var limits = CUB.limitsOf(data);
+  function byId(id){ for (var i = 0; i < limits.length; i++) if (limits[i].id === id) return limits[i]; return null; }
+  if (source === "session") return byId("session");
+  if (source === "allModels") return byId("allModels");
+  if (source === "highest"){
+    var s = byId("session"), a = byId("allModels");
+    if (!s) return a;
+    if (!a) return s;
+    return a.pct > s.pct ? a : s;
+  }
+  if (source === "tightest") return CUB.tightest(limits);
+  return null;
+}
+
+// The spend, badge-sized: "$12". Red at the cap, orange while a full limit
+// bills to it, otherwise coloured against the cap (blue when there is none).
+function creditsBadge(c, data, prefs){
+  var color = c.capReached ? BADGE_HIGH : CUB.creditsInUse(data) ? BADGE_MID
+            : c.limit ? badgeColor(c.pct, prefs) : BADGE_LOW;
+  return { text: CUB.fmtShortMoney(c.used, c.currency) || "$0", color: color };
+}
+
+// { text, color } for the badge, or null to leave it blank. A source the
+// reading has nothing for (no session on a spend-only account, say) falls back
+// to the tightest limit, then to the spend, rather than going blank.
+function badgeFor(data, badge, prefs, now){
   if (!data) return null;
-  if (source === "session") return winPct(data.session);
-  if (source === "allModels") return winPct(data.allModels);
-  // "highest": whichever of session / all-models we have data for.
-  var s = winPct(data.session), a = winPct(data.allModels);
-  if (s == null) return a;
-  if (a == null) return s;
-  return Math.max(s, a);
+  if (badge.source === "credits" && data.credits) return creditsBadge(data.credits, data, prefs);
+  var l = badgeLimit(data, badge.source) || CUB.tightest(CUB.limitsOf(data));
+  if (!l) return data.credits ? creditsBadge(data.credits, data, prefs) : null;
+  var pct = Math.max(0, Math.min(100, Math.round(l.pct)));
+  // Full: the number that matters now is how long until it refills.
+  if (pct >= 100 && l.resetAt){
+    var left = new Date(l.resetAt).getTime() - now;
+    if (left > 0) return { text: CUB.fmtShortSpan(left), color: BADGE_HIGH };
+  }
+  return { text: String(pct), color: badgeColor(pct, prefs) };
 }
 
 function clearBadge(){ chrome.action.setBadgeText({ text: "" }); }
 
-function renderBadge(enabled, badge, data, free){
+function renderBadge(enabled, badge, data, free, prefs){
   if (enabled === false || !badge.enabled) return clearBadge();
   var text, color;
   if (isFree(data)){
     if (!free || !free.count) return clearBadge();
     text = String(free.count); color = BADGE_LOW;
   } else {
-    var pct = badgePct(data, badge.source);
-    if (pct == null) return clearBadge();
-    pct = Math.max(0, Math.min(100, pct));
-    text = String(pct); color = badgeColor(pct);
+    var b = badgeFor(data, badge, prefs, Date.now());
+    if (!b) return clearBadge();
+    text = b.text; color = b.color;
   }
   chrome.action.setBadgeText({ text: text });
   chrome.action.setBadgeBackgroundColor({ color: color });
@@ -113,10 +150,10 @@ function titleFor(data, free){
 }
 
 function refreshBadge(){
-  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, BADGE_KEY, FREE_KEY], function (o){
+  chrome.storage.local.get([TOGGLE_KEY, LAST_KEY, BADGE_KEY, FREE_KEY, PREFS_KEY], function (o){
     var badge = Object.assign({}, DEFAULT_BADGE, o[BADGE_KEY] || {});
     var free = CUBS.summarize(o[FREE_KEY]);
-    renderBadge(o[TOGGLE_KEY] !== false, badge, o[LAST_KEY], free);
+    renderBadge(o[TOGGLE_KEY] !== false, badge, o[LAST_KEY], free, o[PREFS_KEY] || {});
     chrome.action.setTitle({ title: titleFor(o[LAST_KEY], free) });
   });
 }
@@ -148,7 +185,7 @@ function onReading(result){
 // all wake the service worker here and repaint the badge.
 chrome.storage.onChanged.addListener(function (changes, area){
   if (area !== "local") return;
-  if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY] || changes[FREE_KEY]) refreshBadge();
+  if (changes[LAST_KEY] || changes[TOGGLE_KEY] || changes[BADGE_KEY] || changes[FREE_KEY] || changes[PREFS_KEY]) refreshBadge();
   if (changes[LAST_KEY] && changes[LAST_KEY].newValue) onReading(changes[LAST_KEY].newValue);
   // Alerts switched off: the pending reset reminders go with them.
   if (changes[CUBA.SETTINGS_KEY] && !CUBA.settingsOf(changes[CUBA.SETTINGS_KEY].newValue).on) clearResetAlarms();
@@ -319,9 +356,13 @@ function noteFail(h, e){
 async function doRefresh(reason){
   if (refreshing) return;
   refreshing = true;
+  // "Refresh usage now" from the icon's menu: the user asked, so none of the
+  // reasons to skip a scheduled run apply. The 403 block below still does --
+  // it exists to stop poking bot protection, asked or not.
+  var manual = reason === "manual";
   try {
     var st = await sget([TOGGLE_KEY, LAST_KEY, HEALTH_KEY]);
-    if (st[TOGGLE_KEY] === false) return;      // master off: the badge is hidden anyway
+    if (st[TOGGLE_KEY] === false && !manual) return;      // master off: the badge is hidden anyway
     var h = st[HEALTH_KEY] || {};
     if (reason === "alarm" && h.nextAttemptAt && Date.now() < h.nextAttemptAt) return;
 
@@ -329,8 +370,8 @@ async function doRefresh(reason){
     // Free plan: one check a day, not one every five minutes. Ahead of the
     // freshness test on purpose -- a day-old reading is no evidence the session
     // still works, so it must not clear the backoff below either.
-    if (CUB.freeHold(last)) return;
-    if (last && last.fetchedAt && Date.now() - last.fetchedAt < FRESH_MS){
+    if (CUB.freeHold(last) && !manual) return;
+    if (!manual && last && last.fetchedAt && Date.now() - last.fetchedAt < FRESH_MS){
       // A visible tab or the popup just refreshed. Nothing to do, and the fact
       // that it worked means the session is fine, so drop any backoff.
       if (h.fails) await noteOk();
@@ -357,8 +398,33 @@ async function doRefresh(reason){
 }
 
 chrome.alarms.onAlarm.addListener(function (a){
-  if (a.name === ALARM) doRefresh("alarm");
+  // The badge repaints too, so a "2h" countdown on a full limit stays true
+  // even when no new reading arrives to prompt it.
+  if (a.name === ALARM){ refreshBadge(); doRefresh("alarm"); }
   else if (a.name.indexOf(CUBA.RESET_ALARM) === 0) onResetAlarm(a);
+});
+
+// ---- The icon's right-click menu -------------------------------------------
+
+var MENU = [
+  { id: "cub-refresh", title: "Refresh usage now" },
+  { id: "cub-dashboard", title: "Open usage dashboard" },
+  { id: "cub-usage-page", title: "Open Claude's usage page" }
+];
+
+// Menu items outlive the worker, so they are made once per install or update
+// (cleared first, since creating an id that exists is an error).
+function createMenus(){
+  if (!chrome.contextMenus) return;
+  chrome.contextMenus.removeAll(function (){
+    MENU.forEach(function (m){ chrome.contextMenus.create({ id: m.id, title: m.title, contexts: ["action"] }); });
+  });
+}
+
+if (chrome.contextMenus) chrome.contextMenus.onClicked.addListener(function (info){
+  if (info.menuItemId === "cub-refresh") doRefresh("manual");
+  else if (info.menuItemId === "cub-dashboard") chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+  else if (info.menuItemId === "cub-usage-page") chrome.tabs.create({ url: "https://claude.ai/settings/usage" });
 });
 
 // ---- First run ------------------------------------------------------------
@@ -379,7 +445,7 @@ function openSetupIfNeeded(details){
 }
 
 chrome.runtime.onInstalled.addListener(function (details){
-  refreshBadge(); ensureAlarm(); doRefresh("install");
+  refreshBadge(); ensureAlarm(); createMenus(); doRefresh("install");
   openSetupIfNeeded(details);
 });
 chrome.runtime.onStartup.addListener(function (){ refreshBadge(); ensureAlarm(); doRefresh("startup"); });
