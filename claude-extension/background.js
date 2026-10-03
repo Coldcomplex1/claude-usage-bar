@@ -13,8 +13,7 @@
 // come from cub_last, written by the content script and popup. Off by default.
 // A full limit shows the time until it resets instead of "100".
 //
-// The icon's right-click menu adds Refresh now, the dashboard, and Claude's
-// own usage page.
+// The icon's right-click menu adds Refresh now and the dashboard.
 //
 // The content script reacts to the cub_enabled storage change to show/hide the bar.
 
@@ -408,8 +407,7 @@ chrome.alarms.onAlarm.addListener(function (a){
 
 var MENU = [
   { id: "cub-refresh", title: "Refresh usage now" },
-  { id: "cub-dashboard", title: "Open usage dashboard" },
-  { id: "cub-usage-page", title: "Open Claude's usage page" }
+  { id: "cub-dashboard", title: "Open usage dashboard" }
 ];
 
 // Menu items outlive the worker, so they are made once per install or update
@@ -424,7 +422,6 @@ function createMenus(){
 if (chrome.contextMenus) chrome.contextMenus.onClicked.addListener(function (info){
   if (info.menuItemId === "cub-refresh") doRefresh("manual");
   else if (info.menuItemId === "cub-dashboard") chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
-  else if (info.menuItemId === "cub-usage-page") chrome.tabs.create({ url: "https://claude.ai/settings/usage" });
 });
 
 // ---- First run ------------------------------------------------------------

@@ -316,17 +316,8 @@ var CUBH = (function () {
     await sdel(keys);
   }
 
-  async function bytes(){
-    var idx = (await sget([INDEX_KEY]))[INDEX_KEY];
-    var keys = [INDEX_KEY, META_KEY, EVENTS_KEY, INSIGHTS_KEY];
-    if (idx && idx.days) idx.days.forEach(function(d){ keys.push(DAY_PREFIX + d); });
-    return new Promise(function(r){
-      try { chrome.storage.local.getBytesInUse(keys, function(n){ r(n || 0); }); } catch (e){ r(0); }
-    });
-  }
-
   return { INSIGHTS_KEY: INSIGHTS_KEY, EVENTS_KEY: EVENTS_KEY, INDEX_KEY: INDEX_KEY, KEEP_DAYS: KEEP_DAYS,
            dayKey: dayKey, sampleOf: sampleOf, sameAs: sameAs, eventsBetween: eventsBetween, compact: compact,
            insightFor: insightFor, insightsFrom: insightsFrom, activity: activity,
-           range: range, events: events, meta: meta, record: record, clear: clear, bytes: bytes };
+           range: range, events: events, meta: meta, record: record, clear: clear };
 })();

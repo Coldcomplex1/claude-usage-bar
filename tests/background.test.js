@@ -74,6 +74,6 @@ test("renderBadge paints through chrome.action, and clears when off", function()
 test("the right-click menu is created on install", function(){
   const { chrome } = fresh();
   chrome.runtime.onInstalled._fire({ reason: "update" });
-  assert.deepEqual(chrome.contextMenus._items.map(function(m){ return m.id; }), ["cub-refresh", "cub-dashboard", "cub-usage-page"]);
+  assert.deepEqual(chrome.contextMenus._items.map(function(m){ return m.id; }), ["cub-refresh", "cub-dashboard"]);
   assert.ok(chrome.contextMenus._items.every(function(m){ return m.contexts[0] === "action"; }));
 });

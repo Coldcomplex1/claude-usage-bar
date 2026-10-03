@@ -41,7 +41,8 @@ body {
 
 .p-show { margin-top: 14px; }
 .p-show-label { font-size: 11px; opacity: 0.6; }
-.p-chks { display: flex; flex-wrap: wrap; gap: 10px 14px; margin-top: 7px; }
+/* Two to a row, always: Session and All models, then Per-model and Extra usage. */
+.p-chks { display: grid; grid-template-columns: repeat(2, max-content); gap: 10px 24px; margin-top: 7px; }
 .p-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
 .p-chk input { accent-color: #d85a30; width: 14px; height: 14px; cursor: pointer; }
 
