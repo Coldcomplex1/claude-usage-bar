@@ -9,7 +9,7 @@
    alone painted a light bar on a dark page for anyone whose claude.ai theme
    and OS theme disagree. */
 
-#cub-bar.cub-bar, #cub-inline.cub-inline, #cub-setup.cub-setup {
+#cub-bar.cub-bar, #cub-inline.cub-inline, #cub-setup.cub-setup, #cub-toast.cub-toast {
   --cub-fg: #3d3d3a;
   --cub-bg: rgba(255, 255, 255, 0.72);
   --cub-border: rgba(0, 0, 0, 0.08);
@@ -23,7 +23,8 @@
   --cub-surface: #ffffff;
   --cub-dim: rgba(0, 0, 0, 0.34);
 }
-#cub-bar.cub-bar.cub-theme-dark, #cub-inline.cub-inline.cub-theme-dark, #cub-setup.cub-setup.cub-theme-dark {
+#cub-bar.cub-bar.cub-theme-dark, #cub-inline.cub-inline.cub-theme-dark, #cub-setup.cub-setup.cub-theme-dark,
+#cub-toast.cub-toast.cub-theme-dark {
   --cub-fg: #e7e7e3;
   --cub-bg: rgba(45, 45, 43, 0.7);
   --cub-border: rgba(255, 255, 255, 0.12);
@@ -33,7 +34,7 @@
 }
 @media (prefers-color-scheme: dark) {
   #cub-bar.cub-bar:not(.cub-theme-light), #cub-inline.cub-inline:not(.cub-theme-light),
-  #cub-setup.cub-setup:not(.cub-theme-light) {
+  #cub-setup.cub-setup:not(.cub-theme-light), #cub-toast.cub-toast:not(.cub-theme-light) {
     --cub-fg: #e7e7e3;
     --cub-bg: rgba(45, 45, 43, 0.7);
     --cub-border: rgba(255, 255, 255, 0.12);
@@ -57,9 +58,11 @@
   width: min(680px, 92vw); margin: 0; box-shadow: 0 6px 24px rgba(0,0,0,0.14);
 }
 
+/* The value column is wide enough for money as well as a percentage: the
+   extra-usage row reads "$12.40", and from $100 up drops the cents ("$408"). */
 #cub-bar .cub-seg {
   display: grid;
-  grid-template-columns: 100px minmax(30px, 1fr) 42px 58px;
+  grid-template-columns: 100px minmax(30px, 1fr) 48px 58px;
   column-gap: 12px;
   align-items: center;
 }
@@ -69,14 +72,23 @@
 #cub-bar .cub-name { font-weight: 600; }
 #cub-bar .cub-sub { font-size: 10px; opacity: 0.5; }
 
+/* Not overflow:hidden: the pace tick stands a little proud of the track. The
+   fill carries its own rounding, so nothing else needed clipping. */
 #cub-bar .cub-track {
-  display: block; height: 5px; border-radius: 999px;
-  background: var(--cub-track); overflow: hidden;
+  display: block; position: relative; height: 5px; border-radius: 999px;
+  background: var(--cub-track);
 }
 #cub-bar .cub-fill {
   display: block; height: 100%; width: 0; border-radius: 999px;
   background: var(--cub-empty); transition: width 0.4s ease, background 0.3s ease;
 }
+/* Where an even pace would have this window by now: past the tick means
+   spending faster than the window refills. */
+#cub-bar .cub-pace, #cub-inline .cub-i-pace {
+  position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px;
+  border-radius: 1px; background: var(--cub-fg); opacity: 0.5; pointer-events: none;
+}
+#cub-bar .cub-pace[hidden], #cub-inline .cub-i-pace[hidden] { display: none; }
 #cub-bar .cub-fill.cub-low  { background: var(--cub-low); }
 #cub-bar .cub-fill.cub-mid  { background: var(--cub-mid); }
 #cub-bar .cub-fill.cub-high { background: var(--cub-high); }
@@ -94,7 +106,23 @@
 /* .cub-track sets display:block, which outranks the UA sheet's [hidden] rule,
    so hiding it has to be said here. */
 #cub-bar .cub-track[hidden], #cub-bar .cub-note[hidden] { display: none; }
-#cub-bar .cub-reset { text-align: left; font-size: 10px; opacity: 0.55; white-space: nowrap; overflow: hidden; }
+#cub-bar .cub-reset { text-align: left; font-size: 10px; opacity: 0.55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The forecast, on a line of its own under a row that will run out before it
+   resets. It starts under the bar, so the label column stays clean. */
+#cub-bar .cub-fc {
+  grid-column: 2 / -1; margin-top: 3px; font-size: 10.5px; color: var(--cub-mid);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#cub-bar .cub-fc[hidden] { display: none; }
+
+/* Extra usage being billed right now (a limit is full and extra usage is on):
+   a dot before the name, in the warning colour, so it reads on sight. */
+#cub-bar .cub-seg.cub-live .cub-name::before,
+#cub-inline .cub-i-seg.cub-live .cub-i-val::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--cub-mid); margin-right: 5px; vertical-align: 1px;
+}
 
 /* Design 2: compact inline widget that sits in the composer toolbar, between the
    "+" button and the model picker. Scoped and given explicit font/color so
@@ -122,11 +150,20 @@
 #cub-inline .cub-i-reset[hidden] { display: none; }
 #cub-inline .cub-i-reset::before { content: "\00b7"; margin-right: 6px; opacity: 0.7; }
 #cub-inline .cub-i-val { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* A per-model limit's name after its ring ("Fable"), quieter than the value. */
+#cub-inline .cub-i-name { font-size: 10px; opacity: 0.6; margin-left: -3px; }
 
 #cub-inline .cub-i-bar {
-  display: inline-block; width: 80px; height: 5px; border-radius: 999px;
-  background: var(--cub-track); overflow: hidden;
+  display: inline-block; position: relative; width: 80px; height: 5px; border-radius: 999px;
+  background: var(--cub-track);
 }
+/* Design 2's forecast: a small mark after the value; the tooltip says the rest. */
+#cub-inline .cub-i-warn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 50%; margin-left: -2px;
+  background: var(--cub-mid); color: #fff; font-size: 9px; font-weight: 700; line-height: 1;
+}
+#cub-inline .cub-i-warn[hidden] { display: none; }
 #cub-inline .cub-i-fill {
   display: block; height: 100%; width: 0; border-radius: 999px;
   background: var(--cub-empty); transition: width 0.4s ease, background 0.3s ease;
@@ -248,7 +285,31 @@
   #cub-setup .cub-su-designs { flex-direction: column; }
 }
 
+/* An alert (alerts.js), as a toast near the top right of claude.ai. Scoped and
+   explicit for the same reason as everything above: the page's styles stay
+   out, ours stay in. */
+#cub-toast.cub-toast {
+  position: fixed; top: 16px; right: 16px; z-index: 2147483000;
+  box-sizing: border-box; width: min(340px, calc(100vw - 32px));
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 12px 14px;
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: 12.5px; line-height: 1.4; color: var(--cub-fg); text-align: left;
+  background: var(--cub-surface); border: 1px solid var(--cub-border); border-left: 3px solid var(--cub-mid);
+  border-radius: 10px; box-shadow: 0 10px 32px rgba(0,0,0,0.22);
+  animation: cub-toast-in 0.18s ease-out;
+}
+#cub-toast .cub-t-body { flex: 1; min-width: 0; }
+#cub-toast .cub-t-title { font-weight: 650; font-size: 13px; }
+#cub-toast .cub-t-msg { opacity: 0.75; margin-top: 2px; }
+#cub-toast .cub-t-x {
+  flex: none; width: 22px; height: 22px; margin: -3px -2px 0 0; padding: 0; border: 0; border-radius: 6px;
+  background: none; color: inherit; font: inherit; font-size: 16px; line-height: 1; opacity: 0.5; cursor: pointer;
+}
+#cub-toast .cub-t-x:hover { opacity: 0.9; background: var(--cub-track); }
+@keyframes cub-toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   #cub-bar .cub-fill, #cub-inline .cub-i-fill, #cub-inline .cub-i-ring-fill { transition: none; }
+  #cub-toast.cub-toast { animation: none; }
   #cub-setup .cub-su-switch, #cub-setup .cub-su-switch::before { transition: none; }
 }

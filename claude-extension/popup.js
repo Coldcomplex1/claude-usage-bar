@@ -1,63 +1,191 @@
-// popup.js: the slim popup. Usage readout, show-in-bar toggles (Session +
-// All models), Refresh, and a Settings button. Everything else (master on/off,
-// badge, account switch, hotkey) lives on the options page.
+// popup.js: the slim popup. Usage readout (every limit Claude reports, and the
+// extra-usage spend), show-in-bar toggles, Refresh, and a Settings button.
+// Everything else (master on/off, badge, account switch, hotkey) lives on the
+// options page.
 var LAST_KEY = "cub_last";
 var SHOW_KEY = "cub_show";
 var FREE_KEY = "cub_free_session";
-var DEFAULT_SHOW = { session: true, allModels: true };
+var INSIGHTS_KEY = "cub_insights";   // burn-rate forecasts from the history (history.js)
+var PREFS_KEY = "cub_prefs";
+var DEFAULT_SHOW = { session: true, allModels: true, scoped: true, credits: true };
 var FRESH_MS = 60000;      // opening the popup on newer numbers than this costs no request
 
 var shown = null;          // what is currently painted, for the "updated" line
 var statusTimer = null;
+var insights = {};         // limit id -> { rate, fullAt, projected, resetAt }
+var prefs = {};
+var spark = {};            // limit id -> the last day's readings, for the sparklines
+var DAY_MS = 24 * 3600e3;
 
-function colorClass(p){ return p==null ? "" : p>80 ? "high" : p>=30 ? "mid" : "low"; }
-
-function esc(t){ return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function plural(n, w){ return n + " " + w + (n === 1 ? "" : "s"); }
+
+// Elements are built from text nodes, never innerHTML: limit and account names
+// come back from the API, and this page holds the chrome.* APIs.
+function el(tag, cls, text){
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function track(pct, paceAt){
+  var t = el("div", "p-track");
+  var f = el("div", "p-fill " + CUB.colorLevel(pct, prefs));
+  f.style.width = (pct == null ? 0 : pct) + "%";
+  t.appendChild(f);
+  if (paceAt != null){
+    var tick = el("div", "p-pace");
+    tick.style.left = paceAt.toFixed(1) + "%";
+    t.appendChild(tick);
+  }
+  return t;
+}
+
+// Where an even pace would be by now, for the tick, or null to leave it off.
+function paceAt(l){
+  if (prefs.pace === false) return null;
+  var p = CUB.paceOf(l);
+  return p && p.expected >= 2 && p.expected <= 98 ? p.expected : null;
+}
+
+// One line on how the limit is going: a warning when it will run out before it
+// resets, otherwise the pace and where the burn rate puts it at the reset.
+function outlook(l){
+  var f = CUB.forecastOf(l, insights[l.id]);
+  if (f && f.warn) return el("div", "p-fc p-fc-warn", f.text);
+  var bits = [];
+  var p = CUB.paceOf(l);
+  if (p && p.expected >= 2) bits.push(CUB.paceText(p));
+  var ins = insights[l.id];
+  if (f && ins && ins.projected != null) bits.push("~" + Math.round(ins.projected) + "% by the reset at this rate");
+  return bits.length ? el("div", "p-fc", bits.join(" · ")) : null;
+}
+
+function head(label, sub, value, extra){
+  var h = el("div", "p-row-head");
+  h.appendChild(el("span", "p-label", label));
+  if (sub) h.appendChild(el("span", "p-sub", sub));
+  if (extra) h.appendChild(extra);
+  h.appendChild(el("span", "p-val", value));
+  return h;
+}
+
+// The last day of this limit, drawn small beside its value.
+function sparkFor(id){
+  var pts = spark[id];
+  if (!pts || pts.length < 2) return null;
+  var now = Date.now();
+  return CUBC.sparkline(pts, { from: now - DAY_MS, to: now, width: 56, height: 16 });
+}
+
+// Read the last day of history once, then whenever the worker records more.
+function loadSpark(){
+  var now = Date.now();
+  CUBH.range(now - DAY_MS, now).then(function(samples){
+    var out = {};
+    samples.forEach(function(s){
+      Object.keys(s.p).forEach(function(id){ (out[id] || (out[id] = [])).push({ t: s.t, v: s.p[id] }); });
+    });
+    spark = out;
+    if (shown && shown.reported !== false) render(shown);
+  });
+}
 
 // The free-plan row: a count and a countdown, with a line saying why there is no
 // percentage. Claude publishes none for free accounts, and inventing one would
 // need a cap that moves with demand.
-function freeHtml(f){
+function freeRows(f){
+  var frag = document.createDocumentFragment();
   var left = f.resetAt ? CUB.fmtReset(f.resetAt) : "";
   var at = left ? CUB.fmtResetAt(f.resetAt) : "";
-  var aria = "Session: " + plural(f.count, "message") + " counted in this 5-hour window" +
-             (left ? ", resets in " + left : "");
-  return '<div class="p-row" role="status" aria-label="'+esc(aria)+'">'+
-      '<div class="p-row-head">'+
-        '<span class="p-label">Session</span><span class="p-sub">5h</span>'+
-        '<span class="p-val">'+esc(f.count + " msg")+'</span></div>'+
-      (left ? '<div class="p-reset">resets in '+esc(left)+(at ? ' \u00b7 '+esc(at) : '')+'</div>' : '')+
-    '</div>'+
-    '<div class="p-note">Free plan: Claude reports no usage percentage, so this counts '+
-      'the messages you send in the rolling 5-hour window. Counting starts at install.</div>';
+  var row = el("div", "p-row");
+  row.setAttribute("role", "status");
+  row.setAttribute("aria-label", "Session: " + plural(f.count, "message") + " counted in this 5-hour window" +
+                   (left ? ", resets in " + left : ""));
+  row.appendChild(head("Session", "5h", f.count + " msg"));
+  if (left) row.appendChild(el("div", "p-reset", "resets in " + left + (at ? " · " + at : "")));
+  frag.appendChild(row);
+  frag.appendChild(el("div", "p-note", "Free plan: Claude reports no usage percentage, so this counts " +
+    "the messages you send in the rolling 5-hour window. Counting starts at install."));
+  return frag;
 }
 
-function rowHtml(label, sub, d){
-  var pct = d && d.available && d.pct!=null ? Math.round(d.pct) : null;
-  var left = d && d.resetAt && pct>0 ? CUB.fmtReset(d.resetAt) : "";
-  var at = left ? CUB.fmtResetAt(d.resetAt) : "";
-  var aria = label + ": " + (pct==null ? "no data" : pct + "% used" + (left ? ", resets in " + left : ""));
-  return '<div class="p-row" role="progressbar" aria-valuemin="0" aria-valuemax="100"'+
-      (pct==null ? "" : ' aria-valuenow="'+pct+'"')+' aria-valuetext="'+aria+'" aria-label="'+aria+'">'+
-    '<div class="p-row-head">'+
-      '<span class="p-label">'+label+'</span><span class="p-sub">'+sub+'</span>'+
-      '<span class="p-val">'+(pct==null?"–":pct+"%")+'</span></div>'+
-    '<div class="p-track"><div class="p-fill '+colorClass(pct)+'" style="width:'+(pct==null?0:pct)+'%"></div></div>'+
-    (left ? '<div class="p-reset">resets in '+left+(at ? ' · '+at : '')+'</div>' : '')+
-  '</div>';
+function limitRow(l){
+  var pct = l.pct != null ? Math.round(l.pct) : null;
+  var left = l.resetAt && pct > 0 ? CUB.fmtReset(l.resetAt) : "";
+  var at = left ? CUB.fmtResetAt(l.resetAt) : "";
+  var aria = l.label + ": " + (pct == null ? "no data" : pct + "% used" + (left ? ", resets in " + left : ""));
+  var row = el("div", "p-row");
+  row.setAttribute("role", "progressbar");
+  row.setAttribute("aria-valuemin", "0");
+  row.setAttribute("aria-valuemax", "100");
+  if (pct != null) row.setAttribute("aria-valuenow", String(pct));
+  row.setAttribute("aria-valuetext", aria);
+  row.setAttribute("aria-label", aria);
+  if (l.tip) row.title = l.tip;
+  row.appendChild(head(l.label, l.sub, pct == null ? "–" : pct + "%", sparkFor(l.id)));
+  row.appendChild(track(pct, pct == null ? null : paceAt(l)));
+  if (left) row.appendChild(el("div", "p-reset", "resets in " + left + (at ? " · " + at : "")));
+  var o = pct == null ? null : outlook(l);
+  if (o) row.appendChild(o);
+  return row;
+}
+
+// Extra usage: what has been spent, against the monthly cap when there is one,
+// with the balance and auto-reload when Claude reports them, and what state the
+// spending is in right now.
+function creditsCard(data){
+  var c = data.credits, cur = c.currency;
+  var card = el("div", "p-row p-credits");
+  var state = !c.enabled ? ["Off", "off"] : c.capReached ? ["Cap reached", "cap"]
+            : CUB.creditsInUse(data) ? ["In use", "live"] : null;
+  var h = head(c.label || "Extra usage", "", CUB.fmtMoney(c.used, cur));
+  if (state) h.insertBefore(el("span", "p-chip p-chip-" + state[1], state[0]), h.lastChild);
+  card.appendChild(h);
+  if (c.limit){
+    var pct = Math.round(c.pct || 0);
+    card.setAttribute("role", "progressbar");
+    card.setAttribute("aria-valuemin", "0");
+    card.setAttribute("aria-valuemax", "100");
+    card.setAttribute("aria-valuenow", String(pct));
+    card.appendChild(track(pct));
+    card.appendChild(el("div", "p-reset", "of " + CUB.fmtMoney(c.limit, cur, true) + " monthly cap · " + pct + "%"));
+  } else {
+    card.setAttribute("role", "status");
+    card.appendChild(el("div", "p-reset", c.enabled ? "No monthly cap set" : "Spent before it was switched off"));
+  }
+  card.setAttribute("aria-label", (c.label || "Extra usage") + ": " + CUB.fmtMoney(c.used, cur) +
+                    (c.limit ? " of " + CUB.fmtMoney(c.limit, cur, true) : " spent") + (state ? ", " + state[0] : ""));
+  var more = [];
+  if (c.balance != null) more.push("Balance " + CUB.fmtMoney(c.balance, cur));
+  if (c.autoReload != null) more.push("auto-reload " + (c.autoReload ? "on" : "off"));
+  if (more.length) card.appendChild(el("div", "p-reset", more.join(" · ")));
+  if (state && state[1] === "live"){
+    card.appendChild(el("div", "p-note p-note-live", "A limit is full, so what you send now is billed to extra usage at API rates."));
+  }
+  return card;
+}
+
+function renderTier(data){
+  var t = document.getElementById("tier");
+  var name = data && data.tier ? data.tier : "";
+  t.textContent = name;
+  t.hidden = !name;
+  t.title = data && data.orgName ? data.orgName : "";
 }
 
 function render(data, free){
   shown = data || null;
   var rows = document.getElementById("rows");
-  if (!data){ rows.innerHTML = '<div class="p-empty">No data yet</div>'; return; }
+  rows.textContent = "";
+  renderTier(data);
+  if (!data){ rows.appendChild(el("div", "p-empty", "No data yet")); return; }
   // Claude answered with nothing in it: the free plan. Show what we counted
   // ourselves rather than three rows of dashes.
-  if (data.reported === false){ rows.innerHTML = freeHtml(free || CUBS.summarize(null)); return; }
-  var html = rowHtml("Session","5h",data.session) + rowHtml("All models","7d",data.allModels);
-  if (data.opus && data.opus.available) html += rowHtml("Opus","7d",data.opus);
-  rows.innerHTML = html;
+  if (data.reported === false){ rows.appendChild(freeRows(free || CUBS.summarize(null))); return; }
+  CUB.limitsOf(data).forEach(function(l){ rows.appendChild(limitRow(l)); });
+  if (data.credits) rows.appendChild(creditsCard(data));
+  if (!rows.firstChild) rows.appendChild(el("div", "p-empty", "No usage reported"));
 }
 
 function setStatus(t){ document.getElementById("status").textContent = t; }
@@ -116,6 +244,28 @@ function paint(data){
   else render(data);
 }
 
+// Alerts, from here in one click. Desktop notifications need the browser's
+// permission, which is asked for in Settings; here it is the claude.ai toast.
+function renderAlerts(a){
+  var state = document.getElementById("alerts-state"), btn = document.getElementById("alerts-toggle");
+  state.textContent = a.on ? (a.at.length ? "Alerts on at " + a.at.map(function(n){ return n + "%"; }).join(", ") : "Alerts on")
+                           : "Alerts are off";
+  btn.textContent = a.on ? "Turn off" : "Turn on";
+}
+function loadAlerts(){
+  chrome.storage.local.get([CUBA.SETTINGS_KEY], function(o){ renderAlerts(CUBA.settingsOf(o[CUBA.SETTINGS_KEY])); });
+}
+function wireAlerts(){
+  document.getElementById("alerts-toggle").addEventListener("click", function(){
+    chrome.storage.local.get([CUBA.SETTINGS_KEY], function(o){
+      var a = CUBA.settingsOf(o[CUBA.SETTINGS_KEY]);
+      a.on = !a.on;
+      chrome.storage.local.set({ [CUBA.SETTINGS_KEY]: a });
+      renderAlerts(a);
+    });
+  });
+}
+
 function loadShow(){
   chrome.storage.local.get([SHOW_KEY], function(o){
     var show = Object.assign({}, DEFAULT_SHOW, o[SHOW_KEY] || {});
@@ -136,22 +286,37 @@ function wireShow(){
   });
 }
 
+function insightsOf(v){ return v && v.limits && typeof v.limits === "object" ? v.limits : {}; }
+
 document.addEventListener("DOMContentLoaded", function(){
-  chrome.storage.local.get([LAST_KEY], function(o){
+  chrome.storage.local.get([LAST_KEY, INSIGHTS_KEY, PREFS_KEY], function(o){
+    insights = insightsOf(o[INSIGHTS_KEY]);
+    prefs = o[PREFS_KEY] || {};
     if (o[LAST_KEY]){ paint(o[LAST_KEY]); showAge(); }   // paint the cache first, then decide
     refresh(false);
+    loadSpark();
   });
   loadShow(); wireShow();
+  loadAlerts(); wireAlerts();
   statusTimer = setInterval(showAge, 15000);
   // A tab or the alarm refreshing while the popup is open should show up here too.
   chrome.storage.onChanged.addListener(function(changes, area){
     if (area !== "local") return;
     if (changes[LAST_KEY] && changes[LAST_KEY].newValue){ paint(changes[LAST_KEY].newValue); showAge(); }
+    if (changes[CUBH.INDEX_KEY]) loadSpark();
+    if (changes[INSIGHTS_KEY] || changes[PREFS_KEY]){
+      if (changes[INSIGHTS_KEY]) insights = insightsOf(changes[INSIGHTS_KEY].newValue);
+      if (changes[PREFS_KEY]) prefs = changes[PREFS_KEY].newValue || {};
+      if (shown && shown.reported !== false) render(shown);
+    }
     // A tab counted a send while the popup was open.
     if (changes[FREE_KEY] && shown && shown.reported === false) render(shown, CUBS.summarize(changes[FREE_KEY].newValue));
   });
   document.getElementById("refresh").addEventListener("click", function(){ refresh(true); });
   document.getElementById("settings").addEventListener("click", function(){
     chrome.runtime.openOptionsPage();
+  });
+  document.getElementById("dashboard").addEventListener("click", function(){
+    chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
   });
 });

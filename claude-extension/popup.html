@@ -9,6 +9,7 @@
     <div class="p-wrap">
       <div class="p-head">
         <span class="p-title">Claude Usage</span>
+        <span id="tier" class="p-tier" hidden></span>
       </div>
 
       <div id="rows" class="p-rows"><div class="p-empty">Loading…</div></div>
@@ -18,7 +19,14 @@
         <div class="p-chks">
           <label class="p-chk"><input type="checkbox" data-show="session" /><span>Session</span></label>
           <label class="p-chk"><input type="checkbox" data-show="allModels" /><span>All models</span></label>
+          <label class="p-chk" title="Per-model and per-surface limits, such as a Fable-only or Cowork weekly limit"><input type="checkbox" data-show="scoped" /><span>Per-model</span></label>
+          <label class="p-chk" title="Extra usage spend, when there is any"><input type="checkbox" data-show="credits" /><span>Extra usage</span></label>
         </div>
+      </div>
+
+      <div class="p-alerts">
+        <span id="alerts-state" class="p-alerts-state"></span>
+        <button id="alerts-toggle" class="p-link" type="button"></button>
       </div>
 
       <div class="p-foot">
@@ -28,10 +36,18 @@
           <button id="refresh" class="p-btn">Refresh</button>
         </div>
       </div>
+
+      <div class="p-links">
+        <button id="dashboard" class="p-link" type="button">Usage dashboard</button>
+        <a class="p-link" href="https://claude.ai/settings/usage" target="_blank" rel="noopener">Usage page on claude.ai ↗</a>
+      </div>
     </div>
 
     <script src="usage.js"></script>
     <script src="session.js"></script>
+    <script src="history.js"></script>
+    <script src="charts.js"></script>
+    <script src="alerts.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

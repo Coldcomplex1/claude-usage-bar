@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude Usage Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <main class="d-wrap">
+      <header class="d-head">
+        <div class="d-head-text">
+          <h1 class="d-title">Claude usage</h1>
+          <div class="d-sub"><span id="tier" class="d-tier" hidden></span><span id="acct"></span></div>
+        </div>
+        <div class="d-head-actions">
+          <span id="status" class="d-status"></span>
+          <button id="refresh" class="d-btn" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section aria-labelledby="now-h">
+        <h2 id="now-h" class="d-h2">Right now</h2>
+        <div id="now" class="d-now"><div class="d-empty">Loading…</div></div>
+      </section>
+
+      <!-- One filter row, above everything it scopes. -->
+      <div class="d-filters" role="group" aria-label="Time range">
+        <span class="d-filter-label">Showing</span>
+        <div class="d-seg" id="range">
+          <button type="button" data-range="1" aria-pressed="false">24 hours</button>
+          <button type="button" data-range="7" aria-pressed="true">7 days</button>
+          <button type="button" data-range="30" aria-pressed="false">30 days</button>
+        </div>
+      </div>
+
+      <section aria-label="Summary" id="stats" class="d-stats"></section>
+
+      <section class="d-card" aria-labelledby="hist-h">
+        <div class="d-card-head">
+          <div>
+            <h2 id="hist-h" class="d-h2">Usage over time</h2>
+            <div class="d-card-sub">Each limit's percentage, from readings kept on this device. Dots mark where a limit ran out.</div>
+          </div>
+          <button class="d-link" type="button" data-table="hist">Show table</button>
+        </div>
+        <div id="hist" class="d-chart"></div>
+      </section>
+
+      <section class="d-card" id="spend-card" aria-labelledby="spend-h" hidden>
+        <div class="d-card-head">
+          <div>
+            <h2 id="spend-h" class="d-h2">Extra usage spent</h2>
+            <div class="d-card-sub" id="spend-sub">What the extra-usage meter read over time.</div>
+          </div>
+          <button class="d-link" type="button" data-table="spend">Show table</button>
+        </div>
+        <div id="spend" class="d-chart"></div>
+      </section>
+
+      <section class="d-card" aria-labelledby="act-h">
+        <div class="d-card-head">
+          <div>
+            <h2 id="act-h" class="d-h2">When you use Claude</h2>
+            <div class="d-card-sub" id="act-sub"></div>
+          </div>
+          <button class="d-link" type="button" data-table="heat">Show table</button>
+        </div>
+        <div id="heat" class="d-chart"></div>
+        <div class="d-card-head d-card-head-sub">
+          <h3 class="d-h3" id="days-h">Per day</h3>
+          <button class="d-link" type="button" data-table="days">Show table</button>
+        </div>
+        <div id="days" class="d-chart"></div>
+      </section>
+
+      <section class="d-card" aria-labelledby="ev-h">
+        <h2 id="ev-h" class="d-h2">What happened</h2>
+        <ul id="events" class="d-events"></ul>
+      </section>
+
+      <section class="d-card" aria-labelledby="data-h">
+        <h2 id="data-h" class="d-h2">Your data</h2>
+        <p class="d-card-sub">
+          The history lives only in this browser, for <span id="keep-days">60</span> days, and is never sent anywhere.
+          <span id="bytes"></span>
+        </p>
+        <div class="d-actions">
+          <button id="export-csv" class="d-btn" type="button">Export CSV</button>
+          <button id="export-json" class="d-btn" type="button">Export JSON</button>
+          <button id="clear" class="d-btn d-btn-danger" type="button">Clear history</button>
+          <button id="settings" class="d-link" type="button">Settings</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="usage.js"></script>
+    <script src="session.js"></script>
+    <script src="history.js"></script>
+    <script src="charts.js"></script>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

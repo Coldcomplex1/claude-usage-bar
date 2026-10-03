@@ -65,6 +65,57 @@
       </section>
 
       <section class="o-card">
+        <div class="o-row-label">What the bar shows</div>
+        <div class="o-row-sub">On claude.ai. The popup always shows everything.</div>
+        <div class="o-show">
+          <label class="o-radio"><input type="checkbox" data-show="session" /><span>Session (5h)</span></label>
+          <label class="o-radio"><input type="checkbox" data-show="allModels" /><span>Weekly, all models (7d)</span></label>
+          <label class="o-radio"><input type="checkbox" data-show="scoped" /><span>Per-model and other limits, such as Fable only or Cowork</span></label>
+          <label class="o-radio"><input type="checkbox" data-show="credits" /><span>Extra usage, when there is spending to show</span></label>
+        </div>
+
+        <div class="o-row o-row-inner">
+          <div class="o-row-text">
+            <div class="o-row-label">Pace marker</div>
+            <div class="o-row-sub">A tick on each bar where an even pace through the window would be by now.</div>
+          </div>
+          <label class="p-switch" title="Pace marker">
+            <input type="checkbox" id="pref-pace" />
+            <span class="p-slider"></span>
+          </label>
+        </div>
+
+        <div class="o-row o-row-inner">
+          <div class="o-row-text">
+            <div class="o-row-label">Hide the bar until usage reaches</div>
+            <div class="o-row-sub">Keeps it out of the way while there is plenty left. A forecast that a limit will run out, or extra usage billing, still shows it.</div>
+          </div>
+          <select id="pref-hide" class="o-select">
+            <option value="0">Always show</option>
+            <option value="25">25%</option>
+            <option value="50">50%</option>
+            <option value="75">75%</option>
+            <option value="90">90%</option>
+          </select>
+        </div>
+
+        <div class="o-row o-row-inner">
+          <div class="o-row-text">
+            <div class="o-row-label">Colors</div>
+            <div class="o-row-sub">
+              <span class="o-swatch o-sw-low"></span>blue, then
+              <span class="o-swatch o-sw-mid"></span>orange from
+              <input id="pref-mid" class="o-num" type="number" min="1" max="99" step="1" aria-label="Orange from, percent" />%,
+              <span class="o-swatch o-sw-high"></span>red above
+              <input id="pref-high" class="o-num" type="number" min="2" max="100" step="1" aria-label="Red above, percent" />%.
+            </div>
+            <div class="o-row-sub o-err" id="pref-colors-err" role="status"></div>
+          </div>
+          <button id="pref-colors-reset" class="p-link" type="button">Reset</button>
+        </div>
+      </section>
+
+      <section class="o-card">
         <div class="o-row">
           <div class="o-row-text">
             <div class="o-row-label">Show usage on the toolbar icon</div>
@@ -82,7 +133,71 @@
             <label class="o-radio"><input type="radio" name="badge-source" value="session" /><span>Session (5h)</span></label>
             <label class="o-radio"><input type="radio" name="badge-source" value="allModels" /><span>Weekly, all models (7d)</span></label>
             <label class="o-radio"><input type="radio" name="badge-source" value="highest" /><span>Highest of the two</span></label>
+            <label class="o-radio"><input type="radio" name="badge-source" value="tightest" /><span>Tightest limit of all, including per-model ones</span></label>
+            <label class="o-radio"><input type="radio" name="badge-source" value="credits" /><span>Extra usage spent ($)</span></label>
           </div>
+          <div class="o-row-sub o-hint">When the limit it shows is full, the badge counts down to its reset instead ("2h").</div>
+        </div>
+      </section>
+
+      <section class="o-card">
+        <div class="o-row">
+          <div class="o-row-text">
+            <div class="o-row-label">Alerts</div>
+            <div class="o-row-sub">A heads-up before a limit runs out, and when it resets. Off until you turn it on.</div>
+          </div>
+          <label class="p-switch" title="Alerts">
+            <input type="checkbox" id="alerts-on" />
+            <span class="p-slider"></span>
+          </label>
+        </div>
+
+        <div id="alerts-opts" class="o-suboption">
+          <div class="o-row-sub o-suboption-label">Tell me when a limit reaches</div>
+          <div class="o-chips" id="alerts-at">
+            <label class="o-chip"><input type="checkbox" value="50" /><span>50%</span></label>
+            <label class="o-chip"><input type="checkbox" value="75" /><span>75%</span></label>
+            <label class="o-chip"><input type="checkbox" value="80" /><span>80%</span></label>
+            <label class="o-chip"><input type="checkbox" value="90" /><span>90%</span></label>
+            <label class="o-chip"><input type="checkbox" value="95" /><span>95%</span></label>
+            <label class="o-chip"><input type="checkbox" value="100" /><span>100%</span></label>
+          </div>
+          <div class="o-checks">
+            <label class="o-radio"><input type="checkbox" id="alerts-resets" /><span>When a limit I got close to resets</span></label>
+            <label class="o-radio"><input type="checkbox" id="alerts-credits" /><span>When extra usage starts billing, nears its cap, or reaches it</span></label>
+          </div>
+          <div class="o-row o-row-inner">
+            <div class="o-row-text">
+              <div class="o-row-label">Desktop notifications</div>
+              <div class="o-row-sub" id="desktop-sub">When off, alerts show on your open claude.ai tabs. Turning this on asks your browser for permission.</div>
+            </div>
+            <label class="p-switch" title="Desktop notifications">
+              <input type="checkbox" id="alerts-desktop" />
+              <span class="p-slider"></span>
+            </label>
+          </div>
+          <div class="o-test">
+            <button id="alerts-test" class="p-btn" type="button">Send a test alert</button>
+            <span id="alerts-test-status" class="o-row-sub" role="status"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="o-card">
+        <div class="o-row">
+          <div class="o-row-text">
+            <div class="o-row-label">Usage history</div>
+            <div class="o-row-sub">Kept in this browser for 60 days, for the forecasts and the dashboard. Never sent anywhere.</div>
+          </div>
+          <label class="p-switch" title="Keep a usage history">
+            <input type="checkbox" id="pref-history" />
+            <span class="p-slider"></span>
+          </label>
+        </div>
+        <div class="o-test">
+          <button id="open-dashboard" class="p-btn" type="button">Open dashboard</button>
+          <button id="clear-history" class="p-link" type="button">Clear history</button>
+          <span id="history-status" class="o-row-sub" role="status"></span>
         </div>
       </section>
 
@@ -103,13 +218,16 @@
       <section class="o-card">
         <div class="o-row">
           <div class="o-row-text">
-            <div class="o-row-label">Keyboard shortcut</div>
-            <div class="o-row-sub">Show or hide the bar.</div>
+            <div class="o-row-label">Keyboard shortcuts</div>
+            <div class="o-row-sub">Set or change them in your browser's shortcut settings.</div>
           </div>
           <div class="o-actions">
-            <span id="hk" class="p-kbd">…</span>
             <a id="hk-edit" class="p-link" href="#">change</a>
           </div>
+        </div>
+        <div class="o-keys">
+          <div class="o-key"><span>Show or hide the bar</span><span id="hk" class="p-kbd">…</span></div>
+          <div class="o-key"><span>Open the usage popup</span><span id="hk-popup" class="p-kbd">…</span></div>
         </div>
       </section>
 
@@ -120,6 +238,8 @@
 
     <script src="usage.js"></script>
     <script src="session.js"></script>
+    <script src="alerts.js"></script>
+    <script src="history.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

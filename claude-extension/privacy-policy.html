@@ -12,29 +12,46 @@
 </head>
 <body>
   <h1>Privacy Policy for Claude Usage Bar</h1>
-  <p class="muted">Last updated: 9 August 2026</p>
+  <p class="muted">Last updated: 2 October 2026</p>
 
   <p>Claude Usage Bar is a browser extension that displays your Claude.ai usage
-  limits (your current 5-hour session and weekly all-models usage, and an Opus
-  allowance if your plan has one) in a small bar under the chat. On the free plan,
-  where Claude publishes no usage figures, it instead counts the messages you send
-  in the current 5-hour window; see “Counting on the free plan” below.</p>
+  limits (your current 5-hour session, your weekly all-models usage, and any other
+  limit your plan has, such as a per-model weekly limit) and any extra-usage
+  spending, in a small bar under the chat. It keeps a short history of those
+  numbers on your device to show trends and forecasts, and can alert you as a limit
+  nears. On the free plan, where Claude publishes no usage figures, it instead
+  counts the messages you send in the current 5-hour window; see “Counting on the
+  free plan” below.</p>
 
   <h2>What the extension accesses</h2>
   <p>While you are signed in to claude.ai, the extension reads your usage data from
   Claude’s own endpoints using the session that is already in your browser:</p>
   <ul>
     <li>Your organization id and name (to address the correct usage endpoint).</li>
-    <li>Your usage figures: utilization percentages and reset times for the
-      5-hour, 7-day (all models), and Opus windows.</li>
-    <li>Which plan your account is on, taken from the capabilities your
-      organization already reports, so the bar can say why there are no
-      percentages on the free plan.</li>
+    <li>Your usage figures: utilization percentages and reset times for each usage
+      limit Claude reports (the 5-hour, 7-day all-models, and any per-model or
+      per-product limit), and the names Claude gives those limits.</li>
+    <li>Your extra-usage figures, if you use extra usage: the amount spent, your
+      monthly spending cap, and, when Claude reports them, your credit balance and
+      whether auto-reload is on.</li>
+    <li>Which plan your account is on, taken from the capabilities and plan tier
+      your organization already reports, so the extension can name your plan and
+      say why there are no percentages on the free plan.</li>
   </ul>
   <p>These reads happen roughly every five minutes for as long as the extension is
   installed and enabled, including when no claude.ai tab is open, so that the
   numbers you see are current rather than left over from your last visit. They
   stop when you turn the extension off on its Settings page.</p>
+
+  <h2>Usage history kept on your device</h2>
+  <p>To draw trends, forecast when a limit will run out, and show when you tend to
+  use Claude, the extension keeps a history of the figures above: the percentage of
+  each limit, its reset time, and the extra-usage amount, each with the time it was
+  read, plus a log of events such as a limit running out or resetting. It is stored
+  only in your browser, is thinned out after a week, and is deleted after sixty
+  days. You can switch the history off, or clear it at any time, on the Settings
+  page or the dashboard. The dashboard’s export buttons save a copy as a file on
+  your own computer; nothing is uploaded.</p>
 
   <h2>Counting on the free plan</h2>
   <p>Claude does not publish usage percentages for free accounts, so there is
@@ -43,14 +60,22 @@
   conversation and records a timestamp for each one. It never reads, stores, or
   transmits what any message says — only a running count and the times, which are
   kept in your browser and discarded once they fall outside the rolling 5-hour
-  window. This counting runs only on accounts where Claude reports no usage; on a
-  paid plan it never starts.</p>
+  window. For the dashboard it also keeps how many messages were sent in each hour
+  (counts only), for ninety days. This counting runs only on accounts where Claude
+  reports no usage; on a paid plan it never starts.</p>
+
+  <h2>Alerts</h2>
+  <p>Alerts are off unless you turn them on. Whether an alert is due is worked out
+  in your browser from the figures above. Alerts appear on your open claude.ai tabs,
+  or, only if you switch on desktop notifications and your browser grants the
+  permission, as system notifications.</p>
 
   <h2>How the data is used and stored</h2>
-  <p>This data is used only to render the usage bar and the extension’s popup. It is
-  stored locally on your own device using the browser’s <code>storage.local</code>
-  area (your display preferences and the most recent usage numbers, so the bar can
-  show instantly).</p>
+  <p>This data is used only to render the usage bar, the extension’s popup and
+  dashboard, the toolbar badge, and the alerts you ask for. It is stored locally
+  on your own device using the browser’s <code>storage.local</code> area (your
+  preferences, the most recent usage numbers so the bar can show instantly, and the
+  history described above).</p>
 
   <h2>What we do NOT do</h2>
   <ul>
@@ -67,12 +92,19 @@
 
   <h2>Permissions</h2>
   <ul>
-    <li><code>storage</code>: saves your preferences and last-seen usage numbers locally.</li>
+    <li><code>storage</code>: saves your preferences, last-seen usage numbers and the
+      usage history locally.</li>
     <li>host access to <code>https://claude.ai/*</code>: reads your usage from your
       logged-in session. No other website is accessed.</li>
-    <li><code>alarms</code>: schedules the periodic refresh described above. It is a
-      timer only, and gives the extension no additional access to your data.</li>
-    <li><code>commands</code>: the keyboard shortcut to show or hide the bar.</li>
+    <li><code>alarms</code>: schedules the periodic refresh described above, and the
+      alert for when a limit resets. It is a timer only, and gives the extension no
+      additional access to your data.</li>
+    <li><code>contextMenus</code>: adds Refresh, the dashboard, and Claude’s usage
+      page to the toolbar icon’s right-click menu.</li>
+    <li><code>notifications</code> (optional): requested only if you turn on desktop
+      notifications for alerts, and only used for those.</li>
+    <li><code>commands</code>: the keyboard shortcuts to show or hide the bar and to
+      open the popup.</li>
   </ul>
 
   <h2>Limited Use</h2>
@@ -82,14 +114,16 @@
   not transferred off your device.</p>
 
   <h2>Removing your data</h2>
-  <p>Uninstalling the extension removes everything it stored. You can also clear it
-  from <code>chrome://extensions</code> or your browser’s site/extension data tools.</p>
+  <p>Uninstalling the extension removes everything it stored. You can clear the
+  usage history from the extension’s Settings page or dashboard, and clear all of
+  its data from <code>chrome://extensions</code> or your browser’s site/extension
+  data tools.</p>
 
   <h2>Affiliation</h2>
   <p>This extension is not affiliated with, endorsed by, or sponsored by Anthropic.
   “Claude” is a trademark of Anthropic PBC.</p>
 
   <h2>Contact</h2>
-  <p>Questions: <a href="mailto:your-email@example.com">vanquyet180109@gmail.com</p>
+  <p>Questions: <a href="mailto:vanquyet180109@gmail.com">vanquyet180109@gmail.com</a></p>
 </body>
 </html>
