@@ -181,9 +181,8 @@ brings the box back whenever you want it.
 - Click the toolbar icon for the popup: every limit with its pace, forecast and a
   one-day sparkline, the extra-usage card, your plan, "Show in bar" (Session / All
   models / Per-model / Extra usage), a one-click alerts switch, Refresh, Settings,
-  and links to the dashboard and to Claude's own usage page.
-- Right-click the toolbar icon for Refresh usage now, Open usage dashboard, and
-  Open Claude's usage page.
+  and a link to the dashboard.
+- Right-click the toolbar icon for Refresh usage now and Open usage dashboard.
 - Hover anything for the detail: a bar row, or the toolbar icon itself, shows each
   window's percentage, the countdown, the clock time it resets at, the pace, the
   forecast, and how old the reading is. Numbers that could not be refreshed stay on
@@ -228,7 +227,7 @@ brings the box back whenever you want it.
 - host `https://claude.ai/*`: calls the usage endpoint with your existing session.
 - `alarms`: refreshes the numbers every five minutes so they are not stale, and
   times the reset alerts.
-- `contextMenus`: the three items on the toolbar icon's right-click menu.
+- `contextMenus`: the two items on the toolbar icon's right-click menu.
 - `notifications` (optional): only requested if you turn on desktop notifications
   for alerts. Without it, alerts show on claude.ai instead.
 - `commands`: the keyboard shortcuts.

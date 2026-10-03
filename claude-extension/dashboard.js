@@ -402,13 +402,6 @@ function renderEvents(c){
   });
 }
 
-async function renderBytes(){
-  var n = await CUBH.bytes();
-  var act = await new Promise(function(r){ try { chrome.storage.local.getBytesInUse([ACTIVITY_KEY], r); } catch (e){ r(0); } });
-  n += act || 0;
-  document.getElementById("bytes").textContent = n ? "It takes up " + (n < 1e6 ? Math.max(1, Math.round(n / 1024)) + " KB" : (n / 1e6).toFixed(1) + " MB") + "." : "";
-}
-
 function drawRange(c){
   renderStats(c);
   renderHistory(c);
@@ -425,7 +418,6 @@ async function renderRange(){
   loading = load().then(function(c){
     cache = c;
     drawRange(c);
-    renderBytes();
   }).finally(function(){
     loading = null;
     document.querySelectorAll(".d-chart").forEach(function(n){ n.classList.remove("d-loading"); });
@@ -502,7 +494,6 @@ var redrawTimer = null;
 function later(fn, ms){ clearTimeout(redrawTimer); redrawTimer = setTimeout(fn, ms); }
 
 document.addEventListener("DOMContentLoaded", function(){
-  document.getElementById("keep-days").textContent = String(CUBH.KEEP_DAYS);
   sget([LAST_KEY, CUBH.INSIGHTS_KEY, PREFS_KEY]).then(function(o){
     last = o[LAST_KEY] || null;
     insights = insightsOf(o[CUBH.INSIGHTS_KEY]);
